@@ -53,7 +53,10 @@ function buildAnalysis(loans) {
       ? (foreclosureCharge / monthlyInterest).toFixed(1)
       : null
     const isActive = state.emisRemaining > 0 && state.interestRemaining > 100
-
+    const efficiencyScore =
+  penaltyRecoveryMonths
+    ? (netSavings / Number(penaltyRecoveryMonths)) + monthlyInterest
+    : monthlyInterest
     return {
       id: loan.id,
       name: loan.nickname,
@@ -71,6 +74,7 @@ function buildAnalysis(loans) {
       foreclosureCharge,
       totalPayoutToday: foreclosureCharge !== null ? Math.round(state.outstanding + foreclosureCharge) : null,
       netSavings,
+      efficiencyScore,
       penaltyRecoveryMonths,
       gstOnInterest: loan.gstOnInterest || false,
       totalGSTRemaining: loan.gstOnInterest ? Math.round(state.interestRemaining * 0.18) : 0,
@@ -84,9 +88,9 @@ function buildAnalysis(loans) {
   const totalMonthlyInterest = active.reduce((s, l) => s + l.monthlyInterest, 0)
   const totalInterestRemaining = active.reduce((s, l) => s + l.interestRemaining, 0)
 
-  const closeCandidates = active
-    .filter(l => l.canForeclose && l.netSavings !== null && l.netSavings > 0)
-    .sort((a, b) => b.netSavings - a.netSavings)
+ const closeCandidates = active
+  .filter(l => l.canForeclose && l.netSavings !== null && l.netSavings > 0)
+  .sort((a, b) => b.efficiencyScore - a.efficiencyScore)
 
   const bestToClose = closeCandidates[0] || null
   const highestMonthlyInterest = [...active].sort((a, b) => b.monthlyInterest - a.monthlyInterest)[0] || null
