@@ -56,8 +56,28 @@ Formatting rules — follow strictly:
 - Use ₹ with Indian number formatting (lakhs: ₹1.77L, crores: ₹1.2Cr).
 - Be specific — always reference actual loan names and numbers.
 - Be direct. Short sentences. No walls of text.
-- When recommending which loan to close first, NEVER rely on interest rate alone. Always compute net benefit = interest remaining saved minus foreclosure charge for each loan. The loan with highest net benefit should be closed first, even if it has a lower interest rate. A brand new loan (0-3 EMIs paid) is inefficient to foreclose because the penalty is high relative to interest saved so far.
-- Format sections clearly with the exact headers provided.`
+- Format sections clearly with the exact headers provided.
+
+Loan decision rules — follow strictly:
+- NEVER rely on interest rate alone.
+- Always compare loans using pain vs benefit framework.
+- Calculate monthly interest running right now for each loan.
+- Calculate foreclosure penalty and compare it to interest saved.
+- Calculate net benefit = interest remaining saved − foreclosure charge.
+- Calculate penalty recovery time = foreclosure / monthly interest.
+- A loan with lower interest rate can still be worse if principal is larger.
+- A brand new loan (0–3 EMIs) is inefficient to close because penalty applies on full principal.
+- Prefer closing the loan where:
+  - monthly interest bleeding is higher
+  - penalty is recovered faster
+  - net benefit is higher
+
+Always include a **Plain English Reason** section explaining:
+- which loan is costing more per month
+- why higher rate may not mean worse loan
+- which penalty hurts more
+- why the chosen loan gives better overall benefit.
+`
 
 function parseSection(text, header) {
   if (!text) return ''
@@ -184,27 +204,51 @@ ${ranked.map(r => `${r.rank}. ${r.loan.nickname} — Effective APR: ${r.effectiv
 Please provide analysis with EXACTLY these section headers:
 
 ## Which Loan to Close First
-Use this exact framework for each loan — do not skip any step:
 
-1. Calculate PAIN of closing now:
-   - Foreclosure charge amount (outstanding × charge%)
-   - Processing fee already paid (sunk cost — already lost, but factors into efficiency)
-   - Total closing cost = foreclosure charge
+For EACH loan, follow this structure:
 
-2. Calculate BENEFIT of closing now:
-   - Total interest remaining if loan continues to full tenure
-   - This is the money you save by closing
+1. Monthly interest running now
+- outstanding × rate / 12
+- shows how much money is bleeding every month
 
-3. Calculate NET BENEFIT:
-   - Net benefit = Interest saved − Foreclosure charge
-   - Higher net benefit = close this one first
+2. Pain of closing now
+- foreclosure charge
+- mention processing fee already paid
+- total penalty paid today
 
-4. Consider timing efficiency:
-   - If a loan was just taken (0-3 EMIs paid), closing it now means paying foreclosure on nearly full principal with very little interest saved yet — inefficient
-   - If a loan has been running longer with large outstanding, more interest is saved by closing
+3. Benefit of closing now
+- interest remaining
+- monthly interest stopped
 
-5. Final recommendation: Close the loan with highest net benefit, not just highest interest rate.
-   - A lower-rate loan with large outstanding and small foreclosure charge often beats a higher-rate loan that is brand new
+4. Net benefit
+- interest saved − foreclosure
+
+5. Timing efficiency
+- brand new loan → inefficient to close
+- mid tenure loan → better to close
+- explain why
+
+6. Plain English Reason (IMPORTANT)
+Explain simply:
+- which loan is costing more every month
+- which penalty hurts more
+- which gives more benefit
+- why interest rate alone is misleading
+
+Example style:
+- Loan A rate higher but small principal
+- Loan B rate lower but larger principal
+- Loan B bleeding more money monthly
+- Closing Loan A wastes penalty early
+
+7. Final decision
+Choose loan with:
+- highest net benefit
+- highest monthly interest stopped
+- fastest penalty recovery
+
+Be explicit with numbers.
+Explain which loan is hurting more RIGHT NOW.
 
 Show the net benefit calculation for each loan clearly. Be specific with numbers.
 
