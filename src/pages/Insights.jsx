@@ -205,70 +205,79 @@ export default function Insights({ session }) {
 ${JSON.stringify(context, null, 2)}
 
 Priority ranking by effective APR:
-${ranked.map(r => `${r.rank}. ${r.loan.nickname} — Effective APR: ${r.effectiveAPR}% | Foreclosure charge: ${r.loan.foreclosure?.chargePercent || 0}% | Processing fees paid: ₹${Math.round((r.loan.fees?.processingFee || 0) + (r.loan.fees?.processingFeeGST || 0)).toLocaleString('en-IN')} | Interest remaining: ₹${Math.round(getCurrentLoanState(r.loan).interestRemaining).toLocaleString('en-IN')}`).join('\n')}
+${ranked.map(r => {
+  const state = getCurrentLoanState(r.loan)
+  const monthlyInterest = Math.round(state.outstanding * (r.loan.annualInterestRate / 100) / 12)
+  return `${r.rank}. ${r.loan.nickname} — Effective APR: ${r.effectiveAPR}% | Outstanding: ₹${Math.round(state.outstanding).toLocaleString('en-IN')} | Monthly interest NOW: ₹${monthlyInterest.toLocaleString('en-IN')} | Interest remaining: ₹${Math.round(state.interestRemaining).toLocaleString('en-IN')} | EMIs remaining: ${state.emisRemaining} | Foreclosure charge: ${r.loan.foreclosure?.chargePercent || 0}%`
+}).join('\n')}
+
+CRITICAL RULE — Monthly interest must ALWAYS be calculated as:
+  monthly_interest = outstanding × (annual_rate / 100) / 12
+  NEVER divide interest_remaining by months_remaining. That gives wrong numbers.
+
+CRITICAL RULE — Skip any loan where:
+  - emisRemaining <= 0 (loan is fully repaid or in final settlement)
+  - interestRemaining <= 0 (no interest left to save)
+  - outstanding is being settled as a lump sum with no further EMIs
+  These loans have NO interest bleeding. Do not recommend closing them. Mention briefly that they are already being settled.
 
 Please provide analysis with EXACTLY these section headers:
 
 ## Which Loan to Close First
 
-For EACH loan, follow this structure:
+**Step 1 — Active loans only**
+List only loans that still have active EMIs and interest running. Skip any loan already in settlement or with 0 EMIs left.
 
-1. Monthly interest running now
-- outstanding × rate / 12
-- shows how much money is bleeding every month
+**Step 2 — For each active loan, calculate:**
+- Monthly interest bleeding: outstanding × rate / 12
+- Foreclosure penalty: outstanding × chargePercent / 100
+- Interest remaining (total future interest if you do nothing)
+- Net benefit of closing now: interestRemaining − foreclosurePenalty
+- Penalty recovery time: foreclosurePenalty / monthlyInterest (months)
 
-2. Pain of closing now
-- foreclosure charge
-- mention processing fee already paid
-- total penalty paid today
+**Step 3 — Rank by net benefit (highest first)**
+Show a clean numbered list.
 
-3. Benefit of closing now
-- interest remaining
-- monthly interest stopped
+**Step 4 — Final recommendation**
+Name the single best loan to close first. State:
+- How much monthly interest it is bleeding RIGHT NOW
+- What it costs to close (foreclosure penalty)
+- What you save (net benefit)
+- How many months to recover the penalty
 
-4. Net benefit
-- interest saved − foreclosure
-
-5. Timing efficiency
-- brand new loan → inefficient to close
-- mid tenure loan → better to close
-- explain why
-
-6. Plain English Reason (IMPORTANT)
-Explain simply:
-- which loan is costing more every month
-- which penalty hurts more
-- which gives more benefit
-- why interest rate alone is misleading
-
-Example style:
-- Loan A rate higher but small principal
-- Loan B rate lower but larger principal
-- Loan B bleeding more money monthly
-- Closing Loan A wastes penalty early
-
-7. Final decision
-Choose loan with:
-- highest net benefit
-- highest monthly interest stopped
-- fastest penalty recovery
-
-Be explicit with numbers.
-Explain which loan is hurting more RIGHT NOW.
-
-Show the net benefit calculation for each loan clearly. Be specific with numbers.
+**Step 5 — Plain English Reason**
+2–4 bullet points. Explain:
+- Which loan bleeds the most cash per month
+- Why a higher rate doesn't always mean worse (if principal is small)
+- Which penalty hurts more relative to savings
+- Why the chosen loan gives the best overall payoff
 
 ## Hidden Costs Alert
-For each loan, show how much the processing fees and other charges actually added to the true cost. Flag any loan where fees pushed the effective rate more than 0.5% above the stated rate.
+
+For each loan, one line:
+- Loan name: stated rate X% → effective APR Y% (fees added Z% to cost). Flag if fees pushed rate more than 0.5% higher.
 
 ## Foreclosure Analysis
-For each loan where foreclosure is allowed: calculate the total payout today (outstanding + foreclosure charge), interest I'd save by closing now, and net savings. Tell me clearly if it makes financial sense right now.
+
+For each loan where foreclosure is allowed:
+- Total payout today = outstanding + foreclosure charge
+- Interest saved by closing now
+- Net savings = interest saved − foreclosure charge
+- Verdict: Worth it / Not worth it (one line)
 
 ## Smart Moves
-3-4 specific, actionable things I should do with my loans right now. Be concrete.
+
+Give exactly 4 actionable moves. Each move:
+- Title in bold
+- 1–2 lines of specific advice with actual ₹ numbers
+- Must be about THIS person's loans, not generic advice
 
 ## Portfolio Summary
-2-3 sentences summarizing my overall debt situation in plain language.`
+
+3 sentences max. Cover:
+- Total outstanding debt across all loans
+- Which loan is the most expensive problem right now
+- One key thing they should do this month`
 
       const result = await callGroq(SYSTEM_PROMPT, userPrompt, 2000)
       setInsights(result)
