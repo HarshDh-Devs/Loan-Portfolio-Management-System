@@ -81,10 +81,16 @@ Always include a **Plain English Reason** section explaining:
 
 function parseSection(text, header) {
   if (!text) return ''
-  const start = text.indexOf(`## ${header}`)
+
+  const marker = `## ${header}`
+  const start = text.indexOf(marker)
   if (start === -1) return ''
-  const after = text.indexOf('## ', start + 3)
-  return text.slice(start + header.length + 3, after === -1 ? text.length : after).trim()
+
+  const after = text.indexOf('\n## ', start + marker.length)
+
+  return text
+    .slice(start + marker.length, after === -1 ? text.length : after)
+    .trim()
 }
 
 function renderInline(text) {
@@ -533,7 +539,7 @@ function InsightCard({ title, icon, iconBg, content }) {
         <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-base ${iconBg}`}>{icon}</span>
         <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
       </div>
-      <FormattedContent text={content} />
+      <FormattedContent text={content || "No data returned"} />
     </div>
   )
 }
