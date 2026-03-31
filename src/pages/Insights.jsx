@@ -56,6 +56,7 @@ Formatting rules — follow strictly:
 - Use ₹ with Indian number formatting (lakhs: ₹1.77L, crores: ₹1.2Cr).
 - Be specific — always reference actual loan names and numbers.
 - Be direct. Short sentences. No walls of text.
+- When recommending which loan to close first, NEVER rely on interest rate alone. Always compute net benefit = interest remaining saved minus foreclosure charge for each loan. The loan with highest net benefit should be closed first, even if it has a lower interest rate. A brand new loan (0-3 EMIs paid) is inefficient to foreclose because the penalty is high relative to interest saved so far.
 - Format sections clearly with the exact headers provided.`
 
 function parseSection(text, header) {
@@ -183,7 +184,29 @@ ${ranked.map(r => `${r.rank}. ${r.loan.nickname} — Effective APR: ${r.effectiv
 Please provide analysis with EXACTLY these section headers:
 
 ## Which Loan to Close First
-Recommend which loan to pay off first. Factor in: effective APR, foreclosure charges (if I close today, what does it actually cost me?), how much of the processing fee I've already absorbed, and interest I'll save. Show the math briefly. Be specific about the best move.
+Use this exact framework for each loan — do not skip any step:
+
+1. Calculate PAIN of closing now:
+   - Foreclosure charge amount (outstanding × charge%)
+   - Processing fee already paid (sunk cost — already lost, but factors into efficiency)
+   - Total closing cost = foreclosure charge
+
+2. Calculate BENEFIT of closing now:
+   - Total interest remaining if loan continues to full tenure
+   - This is the money you save by closing
+
+3. Calculate NET BENEFIT:
+   - Net benefit = Interest saved − Foreclosure charge
+   - Higher net benefit = close this one first
+
+4. Consider timing efficiency:
+   - If a loan was just taken (0-3 EMIs paid), closing it now means paying foreclosure on nearly full principal with very little interest saved yet — inefficient
+   - If a loan has been running longer with large outstanding, more interest is saved by closing
+
+5. Final recommendation: Close the loan with highest net benefit, not just highest interest rate.
+   - A lower-rate loan with large outstanding and small foreclosure charge often beats a higher-rate loan that is brand new
+
+Show the net benefit calculation for each loan clearly. Be specific with numbers.
 
 ## Hidden Costs Alert
 For each loan, show how much the processing fees and other charges actually added to the true cost. Flag any loan where fees pushed the effective rate more than 0.5% above the stated rate.
