@@ -51,43 +51,25 @@ Formatting rules — follow strictly:
 - Use numbered lists (1. 2. 3.) or bullet points (- ) for multiple items. Never dump everything in one paragraph.
 - Each point must be on its own line.
 - Bold only the key term or loan name using **bold**, not entire sentences.
-- Never write math formulas inline like "₹177,994 + ₹5,339 = ₹183,334". Instead say "Total payout: ₹1,83,334 (outstanding + 3% charge)".
+- Never write math formulas inline. Instead say "Total payout: ₹1,83,334 (outstanding + 3% charge)".
 - Keep each point to 1-2 lines maximum.
-- Use ₹ with Indian number formatting (lakhs: ₹1.77L, crores: ₹1.2Cr).
-- Be specific — always reference actual loan names and numbers.
+- Use ₹ with Indian number formatting (e.g. ₹1,83,334 or ₹45,678).
+- Be specific — always reference actual loan names and numbers from the data given.
 - Be direct. Short sentences. No walls of text.
-- Format sections clearly with the exact headers provided.
+- NEVER use "..." to skip or abbreviate any list. Always write every item in full.
+- Format sections with the exact ## headers provided. Do not add extra headers.
 
-Loan decision rules — follow strictly:
-- NEVER rely on interest rate alone.
-- Always compare loans using pain vs benefit framework.
-- Calculate monthly interest running right now for each loan.
-- Calculate foreclosure penalty and compare it to interest saved.
-- Calculate net benefit = interest remaining saved − foreclosure charge.
-- Calculate penalty recovery time = foreclosure / monthly interest.
-- A loan with lower interest rate can still be worse if principal is larger.
-- A brand new loan (0–3 EMIs) is inefficient to close because penalty applies on full principal.
-- Prefer closing the loan where:
-  - monthly interest bleeding is higher
-  - penalty is recovered faster
-  - net benefit is higher
-
-Always include a **Plain English Reason** section explaining:
-- which loan is costing more per month
-- why higher rate may not mean worse loan
-- which penalty hurts more
-- why the chosen loan gives better overall benefit.
-`
+Loan decision rules:
+- NEVER do any math yourself. All numbers are pre-calculated and provided. Use them exactly as given.
+- NEVER change or re-derive any number from the input data.
+- Your only job is to explain the pre-calculated numbers in clear language.`
 
 function parseSection(text, header) {
   if (!text) return ''
-
   const marker = `## ${header}`
   const start = text.indexOf(marker)
   if (start === -1) return ''
-
   const after = text.indexOf('\n## ', start + marker.length)
-
   return text
     .slice(start + marker.length, after === -1 ? text.length : after)
     .trim()
@@ -110,11 +92,9 @@ function FormattedContent({ text }) {
   return (
     <div className="space-y-2">
       {lines.map((line, i) => {
-        // Numbered list: 1. something
         if (/^\d+\.\s/.test(line)) {
           const num = line.match(/^(\d+)\./)[1]
           const content = line.replace(/^\d+\.\s*/, '')
-          // Check if it has a bold title like **Title**: rest
           const boldMatch = content.match(/^\*\*(.+?)\*\*[:：]?\s*(.*)/)
           return (
             <div key={i} className="flex gap-3 py-1">
@@ -131,7 +111,6 @@ function FormattedContent({ text }) {
           )
         }
 
-        // Bullet: - or •
         if (line.startsWith('- ') || line.startsWith('• ')) {
           const content = line.slice(2)
           const boldMatch = content.match(/^\*\*(.+?)\*\*[:：]?\s*(.*)/)
@@ -150,16 +129,128 @@ function FormattedContent({ text }) {
           )
         }
 
-        // Standalone bold line = section heading
         if (line.startsWith('**') && line.endsWith('**')) {
           return <p key={i} className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-3 mb-1">{line.replace(/\*\*/g, '')}</p>
         }
 
-        // Regular paragraph
         return <p key={i} className="text-sm text-gray-600 leading-relaxed">{renderInline(line)}</p>
       })}
     </div>
   )
+}
+
+// Pre-compute all numbers in JS so the AI never has to do math
+function buildAnalysis(loans) {
+  const fmt = n => '₹' + Math.round(n).toLocaleString('en-IN')
+
+  const loanAnalysis = loans.map(loan => {
+    const state = getCurrentLoanState(loan)
+    const tc = calculateTrueCost(loan)
+    const monthlyInterest = Math.round(state.outstanding * (loan.annualInterestRate / 100) / 12)
+    const foreclosureCharge = loan.foreclosure?.allowed
+      ? Math.round(state.outstanding * (loan.foreclosure.chargePercent || 0) / 100) + (loan.foreclosure.chargeFlatAmount || 0)
+      : null
+    const netSavings = foreclosureCharge !== null
+      ? Math.round(state.interestRemaining - foreclosureCharge)
+      : null
+    const penaltyRecoveryMonths = (foreclosureCharge && monthlyInterest > 0)
+      ? (foreclosureCharge / monthlyInterest).toFixed(1)
+      : null
+    const totalFees = Math.round(
+      (loan.fees?.processingFee || 0) +
+      (loan.fees?.processingFeeGST || 0) +
+      (loan.fees?.insuranceCharges || 0)
+    )
+    const feeRateImpact = Number((tc.effectiveAPR - loan.annualInterestRate).toFixed(2))
+    const isActive = state.emisRemaining > 0 && state.interestRemaining > 100
+
+    return {
+      id: loan.id,
+      name: loan.nickname,
+      type: loan.type,
+      isActive,
+      statedRate: loan.annualInterestRate,
+      effectiveAPR: tc.effectiveAPR,
+      feeRateImpact,
+      outstanding: Math.round(state.outstanding),
+      interestRemaining: Math.round(state.interestRemaining),
+      monthlyInterest,
+      emisRemaining: state.emisRemaining,
+      totalFees,
+      foreclosureAllowed: loan.foreclosure?.allowed || false,
+      foreclosureCharge,
+      totalPayoutToday: foreclosureCharge !== null
+        ? Math.round(state.outstanding + foreclosureCharge)
+        : null,
+      netSavings,
+      penaltyRecoveryMonths,
+      gstOnInterest: loan.gstOnInterest || false,
+      totalGSTRemaining: loan.gstOnInterest ? Math.round(state.interestRemaining * 0.18) : 0,
+    }
+  })
+
+  const activeLoans = loanAnalysis.filter(l => l.isActive)
+  const settledLoans = loanAnalysis.filter(l => !l.isActive)
+
+  const totalOutstanding = loanAnalysis.reduce((s, l) => s + l.outstanding, 0)
+  const totalMonthlyBleeding = activeLoans.reduce((s, l) => s + l.monthlyInterest, 0)
+  const totalInterestRemaining = activeLoans.reduce((s, l) => s + l.interestRemaining, 0)
+
+  // Best loan to close = highest net savings among foreclosure-eligible active loans
+  const bestToClose = [...activeLoans]
+    .filter(l => l.foreclosureAllowed && l.netSavings !== null && l.netSavings > 0)
+    .sort((a, b) => b.netSavings - a.netSavings)[0] || null
+
+  // Highest monthly bleeder
+  const highestBleeder = [...activeLoans].sort((a, b) => b.monthlyInterest - a.monthlyInterest)[0] || null
+
+  // Highest fee impact
+  const highestFeeImpact = [...activeLoans].sort((a, b) => b.feeRateImpact - a.feeRateImpact)[0] || null
+
+  // Ranked by net savings for "close first" section
+  const rankedByNetSavings = [...activeLoans]
+    .filter(l => l.foreclosureAllowed && l.netSavings !== null)
+    .sort((a, b) => b.netSavings - a.netSavings)
+
+  // Build the analysis block string
+  const activeBlock = activeLoans.map(l => `
+LOAN: ${l.name}
+- Stated rate: ${l.statedRate}% | Effective APR: ${l.effectiveAPR}%
+- Fee rate impact: +${l.feeRateImpact}% | Fees paid: ${fmt(l.totalFees)}
+- Outstanding: ${fmt(l.outstanding)} | EMIs remaining: ${l.emisRemaining}
+- Monthly interest bleeding RIGHT NOW: ${fmt(l.monthlyInterest)}
+- Total interest remaining (if nothing done): ${fmt(l.interestRemaining)}${l.gstOnInterest ? `\n- GST on interest remaining: ${fmt(l.totalGSTRemaining)}` : ''}
+- Foreclosure allowed: ${l.foreclosureAllowed ? 'Yes' : 'No'}${l.foreclosureAllowed ? `
+- Foreclosure charge: ${fmt(l.foreclosureCharge)}
+- Total payout to close today: ${fmt(l.totalPayoutToday)}
+- Net savings if closed now: ${fmt(l.netSavings)}
+- Penalty recovery: ${l.penaltyRecoveryMonths} months` : ''}`.trim()
+  ).join('\n\n')
+
+  const settledBlock = settledLoans.length > 0
+    ? `\nLOANS IN FINAL SETTLEMENT / NO ACTIVE INTEREST (exclude from all analysis):\n${settledLoans.map(l => `- ${l.name}: ${fmt(l.outstanding)} outstanding, ${l.emisRemaining} EMIs left — no interest bleeding, do not recommend closing`).join('\n')}`
+    : ''
+
+  const rankBlock = rankedByNetSavings.length > 0
+    ? rankedByNetSavings.map((l, i) =>
+        `${i + 1}. **${l.name}** — net savings: ${fmt(l.netSavings)} | monthly bleeding: ${fmt(l.monthlyInterest)} | penalty: ${fmt(l.foreclosureCharge)} | recovery: ${l.penaltyRecoveryMonths} months`
+      ).join('\n')
+    : 'No foreclosure-eligible active loans found.'
+
+  return {
+    activeLoans,
+    settledLoans,
+    bestToClose,
+    highestBleeder,
+    highestFeeImpact,
+    totalOutstanding,
+    totalMonthlyBleeding,
+    totalInterestRemaining,
+    activeBlock,
+    settledBlock,
+    rankBlock,
+    fmt,
+  }
 }
 
 export default function Insights({ session }) {
@@ -199,87 +290,87 @@ export default function Insights({ session }) {
     setLoading(true)
     setInsights(null)
     try {
-      const context = buildLoanContext(loans)
-      const ranked = rankLoansByPriority(loans)
-      const userPrompt = `Here is my loan portfolio data:
-${JSON.stringify(context, null, 2)}
+      const {
+        activeLoans,
+        settledLoans,
+        bestToClose,
+        highestBleeder,
+        highestFeeImpact,
+        totalOutstanding,
+        totalMonthlyBleeding,
+        totalInterestRemaining,
+        activeBlock,
+        settledBlock,
+        rankBlock,
+        fmt,
+      } = buildAnalysis(loans)
 
-Priority ranking by effective APR:
-${ranked.map(r => {
-  const state = getCurrentLoanState(r.loan)
-  const monthlyInterest = Math.round(state.outstanding * (r.loan.annualInterestRate / 100) / 12)
-  return `${r.rank}. ${r.loan.nickname} — Effective APR: ${r.effectiveAPR}% | Outstanding: ₹${Math.round(state.outstanding).toLocaleString('en-IN')} | Monthly interest NOW: ₹${monthlyInterest.toLocaleString('en-IN')} | Interest remaining: ₹${Math.round(state.interestRemaining).toLocaleString('en-IN')} | EMIs remaining: ${state.emisRemaining} | Foreclosure charge: ${r.loan.foreclosure?.chargePercent || 0}%`
-}).join('\n')}
+      const userPrompt = `All numbers below are PRE-CALCULATED. DO NOT recalculate, re-derive, or change any number. Copy them exactly. Your only job is to write clear explanations using these numbers.
 
-CRITICAL RULE — Monthly interest must ALWAYS be calculated as:
-  monthly_interest = outstanding × (annual_rate / 100) / 12
-  NEVER divide interest_remaining by months_remaining. That gives wrong numbers.
+═══ PORTFOLIO TOTALS ═══
+- Total outstanding across all loans: ${fmt(totalOutstanding)}
+- Total monthly interest bleeding: ${fmt(totalMonthlyBleeding)}
+- Total interest remaining (active loans): ${fmt(totalInterestRemaining)}
+- Active loans: ${activeLoans.length} | Settled/no-interest loans: ${settledLoans.length}
+${settledBlock}
 
-CRITICAL RULE — Skip any loan where:
-  - emisRemaining <= 0 (loan is fully repaid or in final settlement)
-  - interestRemaining <= 0 (no interest left to save)
-  - outstanding is being settled as a lump sum with no further EMIs
-  These loans have NO interest bleeding. Do not recommend closing them. Mention briefly that they are already being settled.
+═══ ACTIVE LOAN DATA (pre-calculated) ═══
+${activeBlock}
 
-Please provide analysis with EXACTLY these section headers:
+═══ RANKED BY NET SAVINGS (for close-first section) ═══
+${rankBlock}
+
+═══ KEY HIGHLIGHTS ═══
+- Best loan to close first: ${bestToClose ? `${bestToClose.name} (net savings: ${fmt(bestToClose.netSavings)}, monthly bleeding: ${fmt(bestToClose.monthlyInterest)}, penalty: ${fmt(bestToClose.foreclosureCharge)}, recovery: ${bestToClose.penaltyRecoveryMonths} months)` : 'None eligible'}
+- Highest monthly bleeder: ${highestBleeder ? `${highestBleeder.name} at ${fmt(highestBleeder.monthlyInterest)}/month` : 'N/A'}
+- Highest hidden fee impact: ${highestFeeImpact ? `${highestFeeImpact.name} (+${highestFeeImpact.feeRateImpact}% above stated rate)` : 'N/A'}
+
+═══ YOUR OUTPUT ═══
+Write EXACTLY these 5 sections. No extra sections. No "..." shortcuts. Complete every list in full.
 
 ## Which Loan to Close First
 
-**Step 1 — Active loans only**
-List only loans that still have active EMIs and interest running. Skip any loan already in settlement or with 0 EMIs left.
-
-**Step 2 — For each active loan, calculate:**
-- Monthly interest bleeding: outstanding × rate / 12
-- Foreclosure penalty: outstanding × chargePercent / 100
-- Interest remaining (total future interest if you do nothing)
-- Net benefit of closing now: interestRemaining − foreclosurePenalty
-- Penalty recovery time: foreclosurePenalty / monthlyInterest (months)
-
-**Step 3 — Rank by net benefit (highest first)**
-Show a clean numbered list.
-
-**Step 4 — Final recommendation**
-Name the single best loan to close first. State:
-- How much monthly interest it is bleeding RIGHT NOW
-- What it costs to close (foreclosure penalty)
-- What you save (net benefit)
-- How many months to recover the penalty
-
-**Step 5 — Plain English Reason**
-2–4 bullet points. Explain:
-- Which loan bleeds the most cash per month
-- Why a higher rate doesn't always mean worse (if principal is small)
-- Which penalty hurts more relative to savings
-- Why the chosen loan gives the best overall payoff
+Start with the ranked list (already given above — copy it as-is, numbered 1 to N).
+Then write:
+**Recommendation:** Name the best loan. State its monthly bleeding, penalty, net savings, and recovery months using the numbers above.
+**Plain English Reason:** 3–4 bullet points explaining:
+- which loan bleeds the most per month and why that matters
+- why interest rate alone is misleading (mention a specific example from the data)
+- why the chosen loan gives the best payoff overall
 
 ## Hidden Costs Alert
 
-For each loan, one line:
-- Loan name: stated rate X% → effective APR Y% (fees added Z% to cost). Flag if fees pushed rate more than 0.5% higher.
+Write one line per ACTIVE loan. Every single one — no skipping, no "...".
+Format: **[Loan name]**: stated [statedRate]% → effective [effectiveAPR]% (fees added [feeRateImpact]% | paid ${fmt(0).replace('0','[totalFees]')})
+Add ⚠️ if feeRateImpact > 0.5
 
 ## Foreclosure Analysis
 
-For each loan where foreclosure is allowed:
-- Total payout today = outstanding + foreclosure charge
-- Interest saved by closing now
-- Net savings = interest saved − foreclosure charge
-- Verdict: Worth it / Not worth it (one line)
+Write one entry per active loan where foreclosureAllowed = Yes. Every single one — no skipping.
+Format per loan:
+**[Loan name]**
+- Close today for: [totalPayoutToday]
+- Interest you'd save: [interestRemaining]
+- Net savings: [netSavings]
+- Penalty recovery: [penaltyRecoveryMonths] months
+- Verdict: Worth it (if netSavings > 0) / Not worth it
 
 ## Smart Moves
 
-Give exactly 4 actionable moves. Each move:
-- Title in bold
-- 1–2 lines of specific advice with actual ₹ numbers
-- Must be about THIS person's loans, not generic advice
+Exactly 4 moves. Each must use a specific loan name and a specific ₹ amount from the data above.
+1. **[Best foreclosure action]** — use bestToClose data. Say exactly how much to pay and what you save.
+2. **[Reduce highest bleeder]** — use highestBleeder data. Suggest extra payment and estimate months saved.
+3. **[Hidden cost finding]** — use highestFeeImpact data. Explain what the fees actually cost.
+4. **[Sequencing tip]** — using the ranked list, explain the order to tackle remaining loans after the first one.
 
 ## Portfolio Summary
 
-3 sentences max. Cover:
-- Total outstanding debt across all loans
-- Which loan is the most expensive problem right now
-- One key thing they should do this month`
+Exactly 3 sentences:
+1. Total debt picture using the portfolio totals above.
+2. The single biggest problem loan right now and why.
+3. The one action to take this month with exact ₹ amount.`
 
-      const result = await callGroq(SYSTEM_PROMPT, userPrompt, 2000)
+      const result = await callGroq(SYSTEM_PROMPT, userPrompt, 2500)
       setInsights(result)
     } catch (err) {
       setInsights(`Error: ${err.message}`)
@@ -294,25 +385,49 @@ Give exactly 4 actionable moves. Each move:
     try {
       const loanA = loans.find(l => l.id === compareA)
       const loanB = loans.find(l => l.id === compareB)
-      const ctxA = buildLoanContext([loanA])[0]
-      const ctxB = buildLoanContext([loanB])[0]
-      const userPrompt = `Compare these two loans side by side:
 
-LOAN A — ${ctxA.name}:
-${JSON.stringify(ctxA, null, 2)}
+      // Pre-compute for compare too
+      const stateA = getCurrentLoanState(loanA)
+      const stateB = getCurrentLoanState(loanB)
+      const tcA = calculateTrueCost(loanA)
+      const tcB = calculateTrueCost(loanB)
+      const fmt = n => '₹' + Math.round(n).toLocaleString('en-IN')
 
-LOAN B — ${ctxB.name}:
-${JSON.stringify(ctxB, null, 2)}
+      const monthlyA = Math.round(stateA.outstanding * (loanA.annualInterestRate / 100) / 12)
+      const monthlyB = Math.round(stateB.outstanding * (loanB.annualInterestRate / 100) / 12)
+      const chargeA = loanA.foreclosure?.allowed ? Math.round(stateA.outstanding * (loanA.foreclosure.chargePercent || 0) / 100) : 0
+      const chargeB = loanB.foreclosure?.allowed ? Math.round(stateB.outstanding * (loanB.foreclosure.chargePercent || 0) / 100) : 0
+      const feesA = Math.round((loanA.fees?.processingFee || 0) + (loanA.fees?.processingFeeGST || 0))
+      const feesB = Math.round((loanB.fees?.processingFee || 0) + (loanB.fees?.processingFeeGST || 0))
 
-Give a clear comparison covering:
+      const userPrompt = `Compare these two loans. All numbers are pre-calculated. Do NOT change them.
+
+LOAN A — ${loanA.nickname}:
+- Stated rate: ${loanA.annualInterestRate}% | Effective APR: ${tcA.effectiveAPR}%
+- Outstanding: ${fmt(stateA.outstanding)} | EMIs remaining: ${stateA.emisRemaining}
+- Monthly interest NOW: ${fmt(monthlyA)}
+- Interest remaining: ${fmt(stateA.interestRemaining)}
+- Total fees paid: ${fmt(feesA)} | Fee impact: +${(tcA.effectiveAPR - loanA.annualInterestRate).toFixed(2)}%
+- Foreclosure charge: ${fmt(chargeA)}${loanA.gstOnInterest ? ' | GST on interest: Yes' : ''}
+
+LOAN B — ${loanB.nickname}:
+- Stated rate: ${loanB.annualInterestRate}% | Effective APR: ${tcB.effectiveAPR}%
+- Outstanding: ${fmt(stateB.outstanding)} | EMIs remaining: ${stateB.emisRemaining}
+- Monthly interest NOW: ${fmt(monthlyB)}
+- Interest remaining: ${fmt(stateB.interestRemaining)}
+- Total fees paid: ${fmt(feesB)} | Fee impact: +${(tcB.effectiveAPR - loanB.annualInterestRate).toFixed(2)}%
+- Foreclosure charge: ${fmt(chargeB)}${loanB.gstOnInterest ? ' | GST on interest: Yes' : ''}
+
+Write these sections using only the numbers above:
+
 ## Head to Head
-A quick table-style comparison of: stated rate, effective APR, outstanding, interest remaining, total fees paid, foreclosure charge.
+A side-by-side bullet comparison: rate, effective APR, outstanding, monthly bleeding, interest remaining, fees paid, foreclosure charge.
 
 ## Which is Costing You More
-Which loan is actually more expensive and why. Factor in all costs — rate, fees, GST if applicable.
+Which loan is actually more expensive right now and why. Reference specific numbers. Mention if GST applies to one.
 
 ## What to Do
-One clear recommendation — which one to focus on paying off first and why.`
+One clear recommendation — which to focus on first and why. One sentence verdict.`
 
       const result = await callGroq(SYSTEM_PROMPT, userPrompt, 1000)
       setCompareResult(result)
@@ -327,17 +442,25 @@ One clear recommendation — which one to focus on paying off first and why.`
     setSurplusLoading(true)
     setSurplusResult(null)
     try {
-      const context = buildLoanContext(loans)
       const mathAlloc = allocateSurplus(loans, Number(surplusAmount))
-      const userPrompt = `I have ₹${Number(surplusAmount).toLocaleString('en-IN')} extra money to put towards my loans.
+      const fmt = n => '₹' + Math.round(n).toLocaleString('en-IN')
 
-My loans:
-${JSON.stringify(context, null, 2)}
+      const allocBlock = mathAlloc.map(a =>
+        `- **${a.loan.nickname}**: put ${fmt(a.allocatedAmount)} here → saves ${fmt(a.netSavings)} net (after ${fmt(a.prepaymentCharge || 0)} prepayment charge)`
+      ).join('\n')
 
-Optimal allocation by effective APR:
-${mathAlloc.map(a => `- ${a.loan.nickname}: put ₹${Math.round(a.allocatedAmount).toLocaleString('en-IN')} here → saves ₹${Math.round(a.netSavings).toLocaleString('en-IN')} net (after ₹${Math.round(a.prepaymentCharge || 0).toLocaleString('en-IN')} charge)`).join('\n')}
+      const userPrompt = `I have ${fmt(Number(surplusAmount))} extra to put towards my loans.
 
-Explain in simple language: where should I put this money, why that order, what I actually save, and any important caveats. Keep it short and practical.`
+OPTIMAL ALLOCATION (pre-calculated by the system — do not change these numbers):
+${allocBlock}
+
+Using only the numbers above, explain in 4–6 bullet points:
+- Where to put the money and in what order
+- Why that order (mention effective APR or net savings from above)
+- What the total savings will be
+- Any important caveat (e.g. prepayment charge, brand new loan penalty)
+
+Be specific, use the loan names and ₹ amounts from above. No generic advice.`
 
       const result = await callGroq(SYSTEM_PROMPT, userPrompt, 800)
       setSurplusResult({ text: result, alloc: mathAlloc })
@@ -354,11 +477,20 @@ Explain in simple language: where should I put this money, why that order, what 
     setChatMessages(m => [...m, { role: 'user', content: userMsg }])
     setChatLoading(true)
     try {
-      const context = buildLoanContext(loans)
+      // Build pre-computed context for chat too
+      const { activeLoans, settledLoans, totalOutstanding, totalMonthlyBleeding, fmt } = buildAnalysis(loans)
+
+      const chatContext = `PRE-CALCULATED LOAN DATA (use these numbers exactly, do not recalculate):
+Total outstanding: ${fmt(totalOutstanding)} | Monthly bleeding: ${fmt(totalMonthlyBleeding)}
+${settledLoans.length > 0 ? `Settled loans (no interest): ${settledLoans.map(l => l.name).join(', ')}\n` : ''}
+Active loans:
+${activeLoans.map(l =>
+  `- ${l.name}: outstanding ${fmt(l.outstanding)}, monthly interest ${fmt(l.monthlyInterest)}, ` +
+  `${l.emisRemaining} EMIs left, effective APR ${l.effectiveAPR}%` +
+  (l.foreclosureAllowed ? `, foreclosure penalty ${fmt(l.foreclosureCharge)}, net savings ${fmt(l.netSavings)}` : ', no foreclosure')
+).join('\n')}`
+
       const history = chatMessages.slice(-6)
-      const contextPrompt = `User's loan portfolio:
-${JSON.stringify(context, null, 2)}
-Answer concisely using only this data. Use plain language and ₹ amounts.`
 
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -366,7 +498,17 @@ Answer concisely using only this data. Use plain language and ₹ amounts.`
         body: JSON.stringify({
           model: GROQ_MODEL,
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT + '\n\nAdditional rules for chat responses:\n- Always use bullet points or numbered lists, never one big paragraph.\n- Each point on its own line.\n- No inline math formulas. Say "Total payout: ₹1.83L" not "₹1,77,994 + ₹5,339 = ₹1,83,334".\n- Max 4-5 lines per response. Be concise.\n- Never show ## headers in chat responses.\n\n' + contextPrompt },
+            {
+              role: 'system',
+              content: SYSTEM_PROMPT +
+                '\n\nAdditional rules for chat responses:\n' +
+                '- Always use bullet points or numbered lists, never one big paragraph.\n' +
+                '- Each point on its own line.\n' +
+                '- Do NOT do any math. Use only the pre-calculated numbers provided.\n' +
+                '- Max 5 bullet points per response. Be concise.\n' +
+                '- Never show ## headers in chat responses.\n\n' +
+                chatContext
+            },
             ...history,
             { role: 'user', content: userMsg },
           ],
@@ -506,7 +648,13 @@ Answer concisely using only this data. Use plain language and ₹ amounts.`
           </div>
           {chatMessages.length === 0 && (
             <div className="px-6 py-4 flex flex-wrap gap-2">
-              {['Which loan should I close first?', 'How much will I save if I pay ₹50,000 extra?', 'Which loan is costing me the most?', 'Should I foreclose any loan right now?', 'How much total interest will I pay?'].map(q => (
+              {[
+                'Which loan should I close first?',
+                'How much will I save if I pay ₹50,000 extra?',
+                'Which loan is costing me the most?',
+                'Should I foreclose any loan right now?',
+                'How much total interest will I pay?',
+              ].map(q => (
                 <button key={q} onClick={() => setChatInput(q)}
                   className="text-xs px-3 py-1.5 border border-gray-200 rounded-full text-gray-500 hover:bg-gray-50 hover:border-gray-300 transition">{q}</button>
               ))}
@@ -516,8 +664,8 @@ Answer concisely using only this data. Use plain language and ₹ amounts.`
             {chatMessages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-lg px-4 py-3 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-green-600 text-white rounded-br-sm' : 'bg-gray-100 text-gray-700 rounded-bl-sm'}`}>
-  {msg.role === 'user' ? msg.content : <FormattedContent text={msg.content} />}
-</div>
+                  {msg.role === 'user' ? msg.content : <FormattedContent text={msg.content} />}
+                </div>
               </div>
             ))}
             {chatLoading && (
@@ -548,7 +696,7 @@ function InsightCard({ title, icon, iconBg, content }) {
         <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-base ${iconBg}`}>{icon}</span>
         <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
       </div>
-      <FormattedContent text={content || "No data returned"} />
+      <FormattedContent text={content || 'No data returned'} />
     </div>
   )
 }
