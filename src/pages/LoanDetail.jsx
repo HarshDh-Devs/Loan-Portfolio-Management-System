@@ -141,7 +141,7 @@ export default function LoanDetail({ session }) {
               <thead>
                 <tr className="bg-gray-50 text-xs text-gray-400 uppercase tracking-wide">
                   <th className="px-4 py-3 text-left font-medium">Month</th>
-                  <th className="px-4 py-3 text-left font-medium">Date</th>
+                  <th className="px-4 py-3 text-left font-medium whitespace-nowrap">Date</th>
                   <th className="px-4 py-3 text-right font-medium">Outstanding Principal</th>
                   <th className="px-4 py-3 text-right font-medium">Closing Balance</th>
                   <th className="px-4 py-3 text-right font-medium">Principal</th>
