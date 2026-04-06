@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getLoans, deleteLoan, migrateLocalToCloud } from '../data/hybridStorage'
-import { getCurrentLoanState, calculateTrueCost } from '../math/engine'
+import { getCurrentLoanState, calculateTrueCost, calculateForeclosureSavings } from '../math/engine'
 import { formatINR, formatINRCompact, formatDate, formatPct } from '../utils/format'
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
@@ -111,6 +111,10 @@ function SummaryCard({ label, value, valueClass = 'text-gray-900' }) {
 
 function LoanCard({ loan, state, trueCost, navigate, onDelete }) {
   const badge = BADGE_COLORS[loan.type] || 'bg-gray-100 text-gray-600'
+
+  const currentMonth = state.emisPaid + 1
+  const fc = calculateForeclosureSavings(loan, currentMonth)
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 flex flex-col gap-3">
       <div className="flex items-start justify-between">
@@ -126,6 +130,14 @@ function LoanCard({ loan, state, trueCost, navigate, onDelete }) {
         <Stat label="Interest left" value={formatINR(state.interestRemaining)} />
         <Stat label="Stated Rate" value={formatPct(loan.annualInterestRate)} valueClass="text-blue-600" />
         <Stat label="Effective APR" value={formatPct(trueCost.effectiveAPR)} valueClass="text-amber-600" />
+        {fc.feasible ? (
+          <>
+            <Stat label="Preclosure Charge" value={formatPct(loan.foreclosure?.chargePercent ?? 0)} valueClass="text-orange-500" />
+            <Stat label="Preclosure Amount" value={formatINR(fc.totalPayout)} valueClass="text-orange-600 font-medium" />
+          </>
+        ) : (
+          <Stat label="Preclosure" value="Not allowed" valueClass="text-gray-400" />
+        )}
       </div>
       <div>
         <div className="flex justify-between text-xs text-gray-400 mb-1">

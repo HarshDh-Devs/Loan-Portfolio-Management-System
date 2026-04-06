@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getLoanById } from '../data/hybridStorage'
-import { generateAmortizationSchedule, getCurrentLoanState, calculateTrueCost } from '../math/engine'
+import { generateAmortizationSchedule, getCurrentLoanState, calculateTrueCost, calculateForeclosureSavings } from '../math/engine'
 import { formatINR, formatDate, formatPct, formatTenure } from '../utils/format'
 import Navbar from '../components/Navbar'
 
@@ -41,6 +41,9 @@ export default function LoanDetail({ session }) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
+  const currentMonth = state.emisPaid + 1
+  const fc = calculateForeclosureSavings(loan, currentMonth)
+
   const totalFees = (loan.fees.processingFee || 0) + (loan.fees.processingFeeGST || 0) + (loan.fees.insuranceCharges || 0)
   const totalInterest = schedule.reduce((s, r) => s + r.interestComponent, 0)
   const totalGST = schedule.reduce((s, r) => s + (r.gstOnInterest || 0), 0)
@@ -77,6 +80,26 @@ export default function LoanDetail({ session }) {
               <p className="text-sm font-medium text-amber-700">18% GST on interest applies to this loan</p>
               <p className="text-xs text-amber-600 mt-0.5">Total GST over tenure: <span className="font-semibold">{formatINR(totalGST)}</span> — charged separately on top of EMI each month.</p>
             </div>
+          </div>
+        )}
+
+        {fc.feasible ? (
+          <div className="bg-orange-50 border border-orange-200 rounded-xl px-5 py-3 mb-6 flex items-center gap-3">
+            <span className="text-orange-500 text-lg">🔒</span>
+            <div>
+              <p className="text-sm font-medium text-orange-700">
+                Preclosure payout today: <span className="font-semibold">{formatINR(fc.totalPayout)}</span>
+                {loan.foreclosure?.chargePercent > 0 && ` (includes ${loan.foreclosure.chargePercent}% charge)`}
+              </p>
+              <p className="text-xs text-orange-600 mt-0.5">
+                Closes loan early · saves <span className="font-semibold">{formatINR(fc.netSavings)}</span> in interest
+                {fc.isWorthIt ? ' — worth it' : ' — charge exceeds savings, consider waiting'}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl px-5 py-3 mb-6">
+            <p className="text-sm text-gray-500">Preclosure: {fc.reason ?? 'Not allowed'}</p>
           </div>
         )}
 
@@ -129,6 +152,7 @@ export default function LoanDetail({ session }) {
                   {hasGST && <th className="px-4 py-3 text-right font-medium text-orange-500">GST (18%)</th>}
                   <th className="px-4 py-3 text-right font-medium">Monthly EMI</th>
                   {hasGST && <th className="px-4 py-3 text-right font-medium text-orange-500">Total Outflow</th>}
+                  <th className="px-4 py-3 text-right font-medium">Preclosure Amount</th>
                   <th className="px-4 py-3 text-right font-medium">Cum. Interest</th>
                 </tr>
               </thead>
@@ -137,6 +161,7 @@ export default function LoanDetail({ session }) {
                   const rowDate = new Date(row.date)
                   const isPast = rowDate < today
                   const isCurrentMonth = rowDate.getFullYear() === today.getFullYear() && rowDate.getMonth() === today.getMonth()
+                  const rowFc = calculateForeclosureSavings(loan, row.month)
                   return (
                     <tr key={row.month} className={`${isCurrentMonth ? 'bg-green-50 font-medium' : ''} ${isPast && !isCurrentMonth ? 'opacity-50' : ''} hover:bg-gray-50 transition`}>
                       <td className="px-4 py-2.5 text-gray-500">
@@ -150,6 +175,9 @@ export default function LoanDetail({ session }) {
                       {hasGST && <td className="px-4 py-2.5 text-right text-orange-400">{formatINR(row.gstOnInterest)}</td>}
                       <td className="px-4 py-2.5 text-right text-gray-700">{formatINR(row.emiPaid)}</td>
                       {hasGST && <td className="px-4 py-2.5 text-right font-medium text-gray-800">{formatINR(row.totalMonthlyOutflow)}</td>}
+                      <td className="px-4 py-2.5 text-right text-orange-500 font-medium">
+                        {rowFc.feasible ? formatINR(rowFc.totalPayout) : '—'}
+                      </td>
                       <td className="px-4 py-2.5 text-right text-gray-400">{formatINR(row.cumulativeInterestPaid)}</td>
                     </tr>
                   )
