@@ -91,10 +91,7 @@ export default function LoanDetail({ session }) {
   Preclosure charge: <span className="font-semibold">{formatINR(fc.foreclosureCharge)}</span>
   {loan.foreclosure?.chargePercent > 0 && ` (${loan.foreclosure.chargePercent}% of outstanding)`}
 </p>
-              <p className="text-xs text-orange-600 mt-0.5">
-                Closes loan early · saves <span className="font-semibold">{formatINR(fc.netSavings)}</span> in interest
-                {fc.isWorthIt ? ' — worth it' : ' — charge exceeds savings, consider waiting'}
-              </p>
+              
             </div>
           </div>
         ) : (
