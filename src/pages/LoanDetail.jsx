@@ -164,7 +164,7 @@ export default function LoanDetail({ session }) {
                       <td className="px-4 py-2.5 text-gray-500">
                         <span className={`${isCurrentMonth ? 'bg-green-500 text-white px-2 py-0.5 rounded-full text-xs' : ''}`}>{row.month}</span>
                       </td>
-                      <td className="px-4 py-2.5 text-gray-600">{formatDate(row.date)}</td>
+                     <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{formatDate(row.date)}</td>
                       <td className="px-4 py-2.5 text-right text-gray-700">{formatINR(row.openingBalance)}</td>
                       <td className="px-4 py-2.5 text-right text-gray-500">{formatINR(row.closingBalance)}</td>
                       <td className="px-4 py-2.5 text-right text-green-600">{formatINR(row.principalComponent)}</td>
