@@ -132,11 +132,11 @@ function LoanCard({ loan, state, trueCost, navigate, onDelete }) {
         <Stat label="Effective APR" value={formatPct(trueCost.effectiveAPR)} valueClass="text-amber-600" />
         {fc.feasible ? (
           <>
-            <Stat label="Preclosure Charge" value={formatPct(loan.foreclosure?.chargePercent ?? 0)} valueClass="text-orange-500" />
-            <Stat label="Preclosure Charge Amt" value={formatINR(fc.foreclosureCharge)} valueClass="text-orange-600 font-medium" />
+            <Stat label="Foreclosure Charge" value={formatPct(loan.foreclosure?.chargePercent ?? 0)} valueClass="text-orange-500" />
+            <Stat label="Foreclosure Charge Amt" value={formatINR(fc.foreclosureCharge)} valueClass="text-orange-600 font-medium" />
           </>
         ) : (
-          <Stat label="Preclosure" value="Not allowed" valueClass="text-gray-400" />
+          <Stat label="Foreclosure" value="Not allowed" valueClass="text-gray-400" />
         )}
       </div>
       <div>

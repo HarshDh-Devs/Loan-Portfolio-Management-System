@@ -88,7 +88,7 @@ export default function LoanDetail({ session }) {
             <span className="text-orange-500 text-lg">🔒</span>
             <div>
               <p className="text-sm font-medium text-orange-700">
-  Preclosure charge: <span className="font-semibold">{formatINR(fc.foreclosureCharge)}</span>
+  Foreclosure charge: <span className="font-semibold">{formatINR(fc.foreclosureCharge)}</span>
   {loan.foreclosure?.chargePercent > 0 && ` (${loan.foreclosure.chargePercent}% of outstanding)`}
 </p>
               
@@ -96,7 +96,7 @@ export default function LoanDetail({ session }) {
           </div>
         ) : (
           <div className="bg-gray-50 border border-gray-200 rounded-xl px-5 py-3 mb-6">
-            <p className="text-sm text-gray-500">Preclosure: {fc.reason ?? 'Not allowed'}</p>
+            <p className="text-sm text-gray-500">Foreclosure: {fc.reason ?? 'Not allowed'}</p>
           </div>
         )}
 
@@ -149,7 +149,7 @@ export default function LoanDetail({ session }) {
                   {hasGST && <th className="px-4 py-3 text-right font-medium text-orange-500">GST (18%)</th>}
                   <th className="px-4 py-3 text-right font-medium">Monthly EMI</th>
                   {hasGST && <th className="px-4 py-3 text-right font-medium text-orange-500">Total Outflow</th>}
-                  <th className="px-4 py-3 text-right font-medium">Preclosure Amount</th>
+                  <th className="px-4 py-3 text-right font-medium">Foreclosure Amount</th>
                   <th className="px-4 py-3 text-right font-medium">Cum. Interest</th>
                 </tr>
               </thead>
