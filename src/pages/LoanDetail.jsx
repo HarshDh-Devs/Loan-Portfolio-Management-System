@@ -88,9 +88,9 @@ export default function LoanDetail({ session }) {
             <span className="text-orange-500 text-lg">🔒</span>
             <div>
               <p className="text-sm font-medium text-orange-700">
-                Preclosure payout today: <span className="font-semibold">{formatINR(fc.totalPayout)}</span>
-                {loan.foreclosure?.chargePercent > 0 && ` (includes ${loan.foreclosure.chargePercent}% charge)`}
-              </p>
+  Preclosure charge: <span className="font-semibold">{formatINR(fc.foreclosureCharge)}</span>
+  {loan.foreclosure?.chargePercent > 0 && ` (${loan.foreclosure.chargePercent}% of outstanding)`}
+</p>
               <p className="text-xs text-orange-600 mt-0.5">
                 Closes loan early · saves <span className="font-semibold">{formatINR(fc.netSavings)}</span> in interest
                 {fc.isWorthIt ? ' — worth it' : ' — charge exceeds savings, consider waiting'}
@@ -175,9 +175,9 @@ export default function LoanDetail({ session }) {
                       {hasGST && <td className="px-4 py-2.5 text-right text-orange-400">{formatINR(row.gstOnInterest)}</td>}
                       <td className="px-4 py-2.5 text-right text-gray-700">{formatINR(row.emiPaid)}</td>
                       {hasGST && <td className="px-4 py-2.5 text-right font-medium text-gray-800">{formatINR(row.totalMonthlyOutflow)}</td>}
-                      <td className="px-4 py-2.5 text-right text-orange-500 font-medium">
-                        {rowFc.feasible ? formatINR(rowFc.totalPayout) : '—'}
-                      </td>
+                     <td className="px-4 py-2.5 text-right text-orange-500 font-medium">
+  {rowFc.feasible ? formatINR(rowFc.foreclosureCharge) : '—'}
+</td>
                       <td className="px-4 py-2.5 text-right text-gray-400">{formatINR(row.cumulativeInterestPaid)}</td>
                     </tr>
                   )
