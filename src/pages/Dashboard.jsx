@@ -159,7 +159,7 @@ export default function Dashboard({ session }) {
       <div className="min-h-screen bg-gray-50">
         <Navbar session={session} activePage="Dashboard" />
         <div className="flex items-center justify-center py-20">
-          <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
         </div>
       </div>
     )
@@ -232,7 +232,7 @@ export default function Dashboard({ session }) {
         <section>
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em]">Credit Cards</h2>
-            <button onClick={() => setShowModal('card')} className="text-sm font-bold text-blue-600 hover:text-blue-700">+ Add Card</button>
+            <button onClick={() => setShowModal('card')} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">+ Add Card</button>
           </div>
           <div className="grid grid-cols-1 gap-4">
             {cards.length === 0 ? (
@@ -256,7 +256,7 @@ export default function Dashboard({ session }) {
             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em]">EMIs & Loans</h2>
             <button
               onClick={() => navigate('/loans')}
-              className="text-sm font-bold text-blue-600 hover:text-blue-700"
+              className="text-sm font-bold text-indigo-600 hover:text-indigo-700"
             >
               + Add Loan
             </button>
@@ -265,31 +265,38 @@ export default function Dashboard({ session }) {
             {loans.map(loan => {
               const state = getCurrentLoanState(loan)
               return (
-                <div key={loan.id} className="bg-white border border-gray-200 rounded-xl py-3 px-6 flex items-center gap-12 shadow-sm hover:border-blue-100 transition-all">
+                <div key={loan.id} className="bg-white border border-slate-100 rounded-2xl py-4 px-6 flex items-center gap-12 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all duration-300 group">
                   <div className="flex flex-col w-[240px] shrink-0">
-                    <span className="text-lg font-bold text-gray-900 truncate tracking-tight leading-tight">{loan.nickname}</span>
-                    <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest mt-0.5">Loan Profile</span>
+                    <span className="text-lg font-semibold text-slate-800 truncate tracking-tight leading-tight group-hover:text-indigo-600 transition-colors">{loan.nickname}</span>
+                    <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mt-1">Loan Profile</span>
                   </div>
 
-                  <div className="grid grid-cols-[120px_160px_100px] gap-4 text-base text-gray-500 font-semibold shrink-0">
+                  <div className="grid grid-cols-[120px_160px_100px] gap-4 text-base text-slate-500 font-medium shrink-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-400 uppercase tracking-widest min-w-[65px]">Next Due:</span>
-                      <span className="text-gray-900 font-bold">{getOrdinal(new Date(state.nextEmiDate).getDate())}</span>
+                      <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[65px]">Next Due</span>
+                      <span className="text-slate-700 font-semibold">{getOrdinal(new Date(state.nextEmiDate).getDate())}</span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-400 uppercase tracking-widest min-w-[65px]">EMI Amt:</span>
-                      <span className="text-gray-900 font-mono font-bold text-lg">{formatINR(loan.emiAmount)}</span>
+                      <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[65px]">EMI Amt</span>
+                      <span className="font-mono font-bold text-lg text-slate-800">
+                        <span className="text-indigo-600/60 mr-0.5 font-sans">₹</span>{(loan.emiAmount || 0).toLocaleString('en-IN')}
+                      </span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-400 uppercase tracking-widest min-w-[45px]">Term:</span>
-                      <span className="text-blue-600 font-bold text-lg">{state.emisPaid + 1}/{loan.tenureMonths}</span>
+                      <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[45px]">Term</span>
+                      <span className="text-indigo-600 font-semibold text-lg">{state.emisPaid + 1}/{loan.tenureMonths}</span>
                     </div>
                   </div>
 
                   <div className="flex-1 flex items-center gap-4 justify-end">
-                    <div className="text-xs text-gray-400 italic">Manage in Loans</div>
+                    <button 
+                      onClick={() => navigate('/loans')}
+                      className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 uppercase tracking-widest transition-colors"
+                    >
+                      Manage in Loans
+                    </button>
                   </div>
                 </div>
               )
@@ -304,7 +311,7 @@ export default function Dashboard({ session }) {
         <section>
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em]">Subscriptions</h2>
-            <button onClick={() => setShowModal('subscription')} className="text-sm font-bold text-blue-600 hover:text-blue-700">+ Add Subscription</button>
+            <button onClick={() => setShowModal('subscription')} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">+ Add Subscription</button>
           </div>
           <div className="grid grid-cols-1 gap-4">
             {subscriptions.length === 0 ? (
@@ -325,7 +332,7 @@ export default function Dashboard({ session }) {
         <section>
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em]">Other Expenses</h2>
-            <button onClick={() => setShowModal('expense')} className="text-sm font-bold text-blue-600 hover:text-blue-700">+ Add Expense</button>
+            <button onClick={() => setShowModal('expense')} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">+ Add Expense</button>
           </div>
           <div className="grid grid-cols-1 gap-4">
             {expenses.length === 0 ? (
@@ -582,7 +589,7 @@ function AddModal({ type, onClose, onAdd }) {
               type="text"
               value={nickname}
               onChange={e => setNickname(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
               placeholder="e.g. Netflix, Rent, HDFC Card"
             />
           </div>
@@ -594,7 +601,7 @@ function AddModal({ type, onClose, onAdd }) {
                 type="text"
                 value={cardName}
                 onChange={e => setCardName(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
                 placeholder="e.g. HDFC Millennia"
               />
             </div>
@@ -607,7 +614,7 @@ function AddModal({ type, onClose, onAdd }) {
                 type="number"
                 value={amount}
                 onChange={e => setAmount(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
                 placeholder="0.00"
               />
             </div>
@@ -620,7 +627,7 @@ function AddModal({ type, onClose, onAdd }) {
               min="1" max="31"
               value={dueDate}
               onChange={e => setDueDate(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
               placeholder="e.g. 15"
             />
           </div>
@@ -632,7 +639,7 @@ function AddModal({ type, onClose, onAdd }) {
                 <select
                   value={feeType}
                   onChange={e => setFeeType(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
                 >
                   <option value="LTF">LTF (Lifetime Free)</option>
                   <option value="paid">Annual Fee Applicable</option>
@@ -647,7 +654,7 @@ function AddModal({ type, onClose, onAdd }) {
                       type="number"
                       value={annualFee}
                       onChange={e => setAnnualFee(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
                       placeholder="e.g. 999"
                     />
                   </div>
@@ -656,7 +663,7 @@ function AddModal({ type, onClose, onAdd }) {
                     <select
                       value={feeMonth}
                       onChange={e => setFeeMonth(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
                     >
                       <option value="">Select Month</option>
                       {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => (
@@ -681,7 +688,7 @@ function AddModal({ type, onClose, onAdd }) {
 
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition-colors mt-6 text-xs uppercase tracking-widest"
+            className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 transition-colors mt-6 text-xs uppercase tracking-widest"
           >
             Add {type}
           </button>
