@@ -5,7 +5,8 @@ export default function Navbar({ session, activePage }) {
   const navigate = useNavigate()
 
   const navItems = [
-    { label: 'Dashboard', path: '/' },
+    { label: 'Dashboard', path: '/dashboard' },
+    { label: 'Loans', path: '/loans' },
     { label: 'Add Loan', path: '/add' },
     { label: 'Simulator', path: '/simulator' },
     { label: 'Insights', path: '/insights' },

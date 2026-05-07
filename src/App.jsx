@@ -1,7 +1,8 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { onAuthChange } from './data/cloudStorage'
 import Dashboard from './pages/Dashboard'
+import Loans from './pages/Loans'
 import AddLoan from './pages/AddLoan'
 import EditLoan from './pages/EditLoan'
 import LoanDetail from './pages/LoanDetail'
@@ -28,7 +29,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Dashboard session={session} />} />
+        <Route path="/" element={<Navigate to="/loans" replace />} />
+        <Route path="/dashboard" element={<Dashboard session={session} />} />
+        <Route path="/loans" element={<Loans session={session} />} />
         <Route path="/add" element={<AddLoan session={session} />} />
         <Route path="/edit/:id" element={<EditLoan session={session} />} />
         <Route path="/loan/:id" element={<LoanDetail session={session} />} />
