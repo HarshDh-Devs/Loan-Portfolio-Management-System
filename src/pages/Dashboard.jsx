@@ -170,35 +170,35 @@ export default function Dashboard({ session }) {
       <Navbar session={session} activePage="Dashboard" />
 
       {/* Summary Bar */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-6 py-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 shadow-sm">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Available Balance</p>
+      <div className="bg-white border-b border-slate-100 shadow-sm">
+        <div className="max-w-6xl mx-auto px-6 py-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="bg-slate-50/50 rounded-2xl p-5 border border-slate-100/50 transition-all hover:shadow-md hover:bg-white">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5">Available Balance</p>
               <div className="flex items-center gap-3">
-                <span className="text-2xl font-bold text-gray-900">{formatINR(balance)}</span>
-                <button
+                <span className="text-3xl font-bold text-slate-800 tracking-tight">{formatINR(balance)}</span>
+                <button 
                   onClick={() => {
                     setBalanceInput(balance.toString())
                     setIsEditingBalance(!isEditingBalance)
                   }}
-                  className="text-[10px] font-bold text-blue-600 hover:underline"
+                  className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 uppercase tracking-wider"
                 >
                   Edit
                 </button>
               </div>
               {isEditingBalance && (
-                <div className="mt-3 flex gap-2">
-                  <input
-                    type="number"
+                <div className="mt-4 flex gap-2">
+                  <input 
+                    type="number" 
                     value={balanceInput}
                     onChange={(e) => setBalanceInput(e.target.value)}
-                    className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
                     placeholder="Enter amount"
                   />
-                  <button
+                  <button 
                     onClick={handleSaveBalance}
-                    className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-md hover:bg-blue-700"
+                    className="px-4 py-2 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 uppercase tracking-widest transition-all shadow-lg shadow-indigo-200"
                   >
                     Save
                   </button>
@@ -206,18 +206,18 @@ export default function Dashboard({ session }) {
               )}
             </div>
 
-            <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 shadow-sm">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Total Bills</p>
-              <span className="text-2xl font-bold text-gray-900">{formatINR(totalBills)}</span>
+            <div className="bg-slate-50/50 rounded-2xl p-5 border border-slate-100/50 transition-all hover:shadow-md hover:bg-white">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5">Total Bills</p>
+              <span className="text-3xl font-bold text-slate-800 tracking-tight">{formatINR(totalBills)}</span>
             </div>
 
-            <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 shadow-sm">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Difference</p>
+            <div className="bg-slate-50/50 rounded-2xl p-5 border border-slate-100/50 transition-all hover:shadow-md hover:bg-white">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5">Difference</p>
               <div className="flex flex-col">
-                <span className={`text-2xl font-bold ${difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <span className={`text-3xl font-bold tracking-tight ${difference >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                   {formatINR(Math.abs(difference))}
                 </span>
-                <span className={`text-[10px] font-bold mt-1 ${difference >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                <span className={`text-[10px] font-bold mt-1 tracking-widest ${difference >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                   {difference >= 0 ? 'SURPLUS' : 'DEFICIT'}
                 </span>
               </div>
@@ -401,33 +401,33 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill }) {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden group shadow-sm hover:border-blue-100 transition-all">
-      <div className="py-3 px-6 flex items-center gap-12">
+    <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md hover:border-indigo-100 transition-all duration-300">
+      <div className="py-4 px-6 flex items-center gap-12">
         {/* Left: Nickname & Details Toggle (Fixed Width) */}
         <div className="flex flex-col w-[240px] shrink-0">
-          <span className="text-lg font-bold text-gray-900 truncate tracking-tight leading-tight">{item.nickname}</span>
-          <button
+          <span className="text-lg font-semibold text-slate-800 truncate tracking-tight leading-tight group-hover:text-indigo-600 transition-colors">{item.nickname}</span>
+          <button 
             onClick={() => setShowDetails(!showDetails)}
-            className="text-[10px] font-bold text-gray-400 hover:text-blue-500 flex items-center gap-1 mt-0.5 text-left transition-colors"
+            className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 mt-1 text-left transition-colors tracking-widest uppercase"
           >
-            <span>{showDetails ? '▴ HIDE DETAILS' : '▾ SHOW DETAILS'}</span>
+            <span>{showDetails ? '▴ Hide Details' : '▾ Show Details'}</span>
           </button>
         </div>
 
         {/* Middle: Aligned Info Columns (Fixed Widths for Perfect Alignment) */}
-        <div className="grid grid-cols-[120px_160px_100px] gap-4 text-base text-gray-500 font-semibold shrink-0">
+        <div className="grid grid-cols-[120px_160px_100px] gap-4 text-base text-slate-500 font-medium shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-400 uppercase tracking-widest min-w-[35px]">Due:</span>
-            <span className="text-gray-900 font-bold">{item.due_date ? getOrdinal(item.due_date) : '—'}</span>
+            <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[35px]">Due</span>
+            <span className="text-slate-700 font-semibold">{item.due_date ? getOrdinal(item.due_date) : '—'}</span>
           </div>
-
+          
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-400 uppercase tracking-widest min-w-[55px]">Amount:</span>
+            <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[55px]">Amount</span>
             {isPaid ? (
-              <span className="text-green-600 font-bold text-base bg-green-50 px-3 py-0.5 rounded-full border border-green-100">PAID</span>
+              <span className="text-emerald-600 font-bold text-[10px] bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100 tracking-widest uppercase">Paid</span>
             ) : (
-              <span className="font-mono font-bold text-lg text-gray-900">
-                {formatINR(amount || 0)}
+              <span className="font-mono font-bold text-lg text-slate-800">
+                <span className="text-indigo-600/60 mr-0.5 font-sans">₹</span>{(amount || 0).toLocaleString('en-IN')}
               </span>
             )}
           </div>
@@ -435,8 +435,8 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill }) {
           <div className="flex items-center gap-2">
             {type === 'emi' && (
               <>
-                <span className="text-[10px] text-gray-400 uppercase tracking-widest min-w-[40px]">Progress:</span>
-                <span className="text-blue-600 font-bold text-lg">{item.current_month}/{item.total_months}</span>
+                <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[40px]">Term</span>
+                <span className="text-indigo-600 font-semibold text-lg">{item.current_month}/{item.total_months}</span>
               </>
             )}
           </div>
@@ -445,35 +445,36 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill }) {
         {/* Right: Actions (Pushed to end) */}
         <div className="flex-1 flex items-center gap-4 justify-end">
           {type === 'card' && !isPaid && (
-            <input
+            <input 
               type="number"
               value={localAmount}
               onChange={(e) => setLocalAmount(e.target.value)}
               onBlur={handleBlur}
               onKeyDown={handleKeyDown}
               placeholder="Set bill"
-              className="w-24 px-3 py-1 text-sm font-mono border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50"
+              className="w-24 px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/30 transition-all"
             />
           )}
 
           {/* Only show Mark Paid for Credit Cards */}
           {type === 'card' && (
-            <button
+            <button 
               onClick={onTogglePaid}
-              className={`px-5 py-1.5 text-[10px] font-bold rounded-full border transition-all shadow-sm ${isPaid
-                  ? 'bg-green-50 border-green-200 text-green-600'
-                  : 'bg-white border-gray-200 text-gray-600 hover:border-blue-500 hover:text-blue-500'
-                }`}
+              className={`px-5 py-1.5 text-[10px] font-bold rounded-full border transition-all shadow-sm tracking-widest uppercase ${
+                isPaid 
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-600 cursor-default' 
+                : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-500 hover:text-indigo-600 active:scale-95'
+              }`}
             >
-              {isPaid ? 'PAID ✓' : 'MARK PAID'}
+              {isPaid ? 'Settled ✓' : 'Mark Paid'}
             </button>
           )}
 
-          <button
+          <button 
             onClick={onDelete}
-            className="text-gray-300 hover:text-red-500 transition-colors p-1"
+            className="text-slate-300 hover:text-rose-500 transition-colors p-1.5 rounded-lg hover:bg-rose-50"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
           </button>
@@ -481,34 +482,34 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill }) {
       </div>
 
       {showDetails && (
-        <div className="bg-gray-50 border-t border-gray-100 px-8 py-3 grid grid-cols-2 md:grid-cols-4 gap-8">
+        <div className="bg-slate-50/50 border-t border-slate-100 px-8 py-4 grid grid-cols-2 md:grid-cols-4 gap-8">
           {type === 'card' && (
             <div className="space-y-0.5">
-              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Full Card Name</p>
-              <p className="text-base font-bold text-gray-800">{item.card_name || '—'}</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Full Card Name</p>
+              <p className="text-sm font-semibold text-slate-700">{item.card_name || '—'}</p>
             </div>
           )}
 
           <div className="space-y-0.5">
-            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Total Paid</p>
-            <p className="text-base font-mono font-bold text-gray-800">{formatINR(item.total_paid || 0)}</p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total Paid</p>
+            <p className="text-sm font-mono font-semibold text-slate-700">{formatINR(item.total_paid || 0)}</p>
           </div>
-
+          
           {type === 'card' && (
             <>
               <div className="space-y-0.5">
-                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Annual Fee</p>
-                <p className="text-base font-bold text-gray-800">
-                  {item.annual_fee_type === 'LTF'
-                    ? <span className="text-green-600">LTF</span>
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Annual Fee</p>
+                <p className="text-sm font-semibold text-slate-700">
+                  {item.annual_fee_type === 'LTF' 
+                    ? <span className="text-emerald-600">LTF</span> 
                     : `${formatINR(item.annual_fee)} in ${item.fee_month}`
                   }
                 </p>
               </div>
               {item.annual_fee_type === 'paid' && (
                 <div className="space-y-0.5">
-                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Waiver Target</p>
-                  <p className="text-base font-bold text-gray-800">{formatINR(item.waiver_amount)}</p>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Waiver Target</p>
+                  <p className="text-sm font-semibold text-slate-700">{formatINR(item.waiver_amount)}</p>
                 </div>
               )}
             </>
