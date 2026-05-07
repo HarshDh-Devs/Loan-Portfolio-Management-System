@@ -29,7 +29,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/loans" replace />} />
+        <Route path="/" element={session ? <Navigate to="/dashboard" replace /> : <Navigate to="/loans" replace />} />
         <Route path="/dashboard" element={<Dashboard session={session} />} />
         <Route path="/loans" element={<Loans session={session} />} />
         <Route path="/add" element={<AddLoan session={session} />} />
