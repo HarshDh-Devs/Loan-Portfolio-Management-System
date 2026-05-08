@@ -17,6 +17,7 @@ const BADGE_COLORS = {
 export default function Loans({ session }) {
   const [loans, setLoans] = useState([])
   const [loading, setLoading] = useState(true)
+  const [sortOption, setSortOption] = useState('none')
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -73,7 +74,22 @@ export default function Loans({ session }) {
             </div>
 
             <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-medium text-gray-400 uppercase tracking-widest">Your Loans</p>
+              <div className="flex items-center gap-4">
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-widest">Your Loans</p>
+                <select 
+                  value={sortOption}
+                  onChange={(e) => setSortOption(e.target.value)}
+                  className="text-[10px] font-bold text-green-600 bg-white border border-gray-200 rounded px-2 py-1 uppercase tracking-widest outline-none hover:border-green-400 transition-all cursor-pointer shadow-sm"
+                >
+                  <option value="none">Default Sort</option>
+                  <option value="outstanding_high">Outstanding: High to Low</option>
+                  <option value="outstanding_low">Outstanding: Low to High</option>
+                  <option value="emi_high">EMI: High to Low</option>
+                  <option value="emi_low">EMI: Low to High</option>
+                  <option value="rate_high">Rate: High to Low</option>
+                  <option value="rate_low">Rate: Low to High</option>
+                </select>
+              </div>
               <button onClick={() => navigate('/add')} className="px-4 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 font-medium">
                 + Add Loan
               </button>
@@ -88,9 +104,19 @@ export default function Loans({ session }) {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {states.map(({ loan, state, trueCost }) => (
-                  <LoanCard key={loan.id} loan={loan} state={state} trueCost={trueCost} navigate={navigate} onDelete={handleDelete} />
-                ))}
+                {[...states]
+                  .sort((a, b) => {
+                    if (sortOption === 'outstanding_high') return b.state.outstanding - a.state.outstanding
+                    if (sortOption === 'outstanding_low') return a.state.outstanding - b.state.outstanding
+                    if (sortOption === 'emi_high') return b.loan.emiAmount - a.loan.emiAmount
+                    if (sortOption === 'emi_low') return a.loan.emiAmount - b.loan.emiAmount
+                    if (sortOption === 'rate_high') return b.loan.annualInterestRate - a.loan.annualInterestRate
+                    if (sortOption === 'rate_low') return a.loan.annualInterestRate - b.loan.annualInterestRate
+                    return 0
+                  })
+                  .map(({ loan, state, trueCost }) => (
+                    <LoanCard key={loan.id} loan={loan} state={state} trueCost={trueCost} navigate={navigate} onDelete={handleDelete} />
+                  ))}
               </div>
             )}
           </>

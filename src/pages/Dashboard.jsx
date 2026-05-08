@@ -23,6 +23,10 @@ export default function Dashboard({ session }) {
   const [subscriptions, setSubscriptions] = useState([])
   const [expenses, setExpenses] = useState([])
   const [loans, setLoans] = useState([])
+  const [loanSort, setLoanSort] = useState('none')
+  const [cardSort, setCardSort] = useState('none')
+  const [subscriptionSort, setSubscriptionSort] = useState('none')
+  const [expenseSort, setExpenseSort] = useState('none')
 
   const [showModal, setShowModal] = useState(null) // 'card', 'subscription', 'emi', 'expense'
 
@@ -154,6 +158,35 @@ export default function Dashboard({ session }) {
     setCards(prev => prev.map(c => c.id === id ? { ...c, bill_amount: amount } : c))
   }
 
+  const updateTotalPaid = async (type, id, val) => {
+    const amount = parseFloat(val) || 0
+    const updates = { total_paid: amount }
+    if (type === 'card') {
+      await updateCard(session, id, updates)
+      setCards(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
+    } else if (type === 'subscription') {
+      await updateSubscription(session, id, updates)
+      setSubscriptions(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s))
+    } else if (type === 'expense') {
+      await updateExpense(session, id, updates)
+      setExpenses(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e))
+    }
+  }
+
+  const updateNotes = async (type, id, val) => {
+    const updates = { notes: val }
+    if (type === 'card') {
+      await updateCard(session, id, updates)
+      setCards(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
+    } else if (type === 'subscription') {
+      await updateSubscription(session, id, updates)
+      setSubscriptions(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s))
+    } else if (type === 'expense') {
+      await updateExpense(session, id, updates)
+      setExpenses(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e))
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -170,57 +203,55 @@ export default function Dashboard({ session }) {
       <Navbar session={session} activePage="Dashboard" />
 
       {/* Summary Bar */}
-      <div className="bg-white border-b border-slate-100 shadow-sm">
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="bg-slate-50/50 rounded-2xl p-5 border border-slate-100/50 transition-all hover:shadow-md hover:bg-white">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5">Available Balance</p>
-              <div className="flex items-center gap-3">
-                <span className="text-3xl font-bold text-slate-800 tracking-tight">{formatINR(balance)}</span>
+      <div className="max-w-6xl mx-auto px-6 py-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 relative group">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Available Balance</p>
+            <div className="flex items-baseline gap-3">
+              <span className="text-2xl font-semibold text-gray-900">{formatINR(balance)}</span>
+              <button 
+                onClick={() => {
+                  setBalanceInput(balance.toString())
+                  setIsEditingBalance(!isEditingBalance)
+                }}
+                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                Edit
+              </button>
+            </div>
+            {isEditingBalance && (
+              <div className="mt-3 flex gap-2">
+                <input 
+                  type="number" 
+                  value={balanceInput}
+                  onChange={(e) => setBalanceInput(e.target.value)}
+                  className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-50"
+                  placeholder="Amount"
+                />
                 <button 
-                  onClick={() => {
-                    setBalanceInput(balance.toString())
-                    setIsEditingBalance(!isEditingBalance)
-                  }}
-                  className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 uppercase tracking-wider"
+                  onClick={handleSaveBalance}
+                  className="px-3 py-1.5 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 uppercase tracking-widest transition-all"
                 >
-                  Edit
+                  Save
                 </button>
               </div>
-              {isEditingBalance && (
-                <div className="mt-4 flex gap-2">
-                  <input 
-                    type="number" 
-                    value={balanceInput}
-                    onChange={(e) => setBalanceInput(e.target.value)}
-                    className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
-                    placeholder="Enter amount"
-                  />
-                  <button 
-                    onClick={handleSaveBalance}
-                    className="px-4 py-2 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 uppercase tracking-widest transition-all shadow-lg shadow-indigo-200"
-                  >
-                    Save
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
+          </div>
 
-            <div className="bg-slate-50/50 rounded-2xl p-5 border border-slate-100/50 transition-all hover:shadow-md hover:bg-white">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5">Total Bills</p>
-              <span className="text-3xl font-bold text-slate-800 tracking-tight">{formatINR(totalBills)}</span>
-            </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Total Bills</p>
+            <span className="text-2xl font-semibold text-gray-900">{formatINR(totalBills)}</span>
+          </div>
 
-            <div className="bg-slate-50/50 rounded-2xl p-5 border border-slate-100/50 transition-all hover:shadow-md hover:bg-white">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5">Difference</p>
-              <div className="flex flex-col">
-                <span className={`text-3xl font-bold tracking-tight ${difference >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  {formatINR(Math.abs(difference))}
-                </span>
-                <span className={`text-[10px] font-bold mt-1 tracking-widest ${difference >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                  {difference >= 0 ? 'SURPLUS' : 'DEFICIT'}
-                </span>
-              </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Difference</p>
+            <div className="flex items-baseline gap-2">
+              <span className={`text-2xl font-semibold ${difference >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {formatINR(Math.abs(difference))}
+              </span>
+              <span className={`text-[10px] font-bold uppercase tracking-widest ${difference >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                {difference >= 0 ? 'Surplus' : 'Deficit'}
+              </span>
             </div>
           </div>
         </div>
@@ -230,63 +261,126 @@ export default function Dashboard({ session }) {
 
         {/* Credit Cards Section */}
         <section>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em]">Credit Cards</h2>
-            <button onClick={() => setShowModal('card')} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">+ Add Card</button>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest">Credit Cards</h2>
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sort By</span>
+                <select 
+                  value={cardSort}
+                  onChange={(e) => setCardSort(e.target.value)}
+                  className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
+                >
+                  <option value="none">Default</option>
+                  <option value="due">Due Day (1-31)</option>
+                  <option value="amount_high">Bill Amount (High-Low)</option>
+                  <option value="amount_low">Bill Amount (Low-High)</option>
+                </select>
+              </div>
+              <button onClick={() => setShowModal('card')} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">+ Add Card</button>
+            </div>
           </div>
           <div className="grid grid-cols-1 gap-4">
             {cards.length === 0 ? (
               <p className="text-base text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No credit cards added</p>
-            ) : cards.map(card => (
-              <ItemCard
-                key={card.id}
-                item={card}
-                type="card"
-                onTogglePaid={() => togglePaid('card', card)}
-                onDelete={() => handleDelete('card', card.id)}
-                onUpdateBill={(val) => updateBillAmount(card.id, val)}
-              />
-            ))}
+            ) : [...cards]
+              .sort((a, b) => {
+                if (cardSort === 'due') return (a.due_date || 99) - (b.due_date || 99)
+                if (cardSort === 'amount_high') return (b.bill_amount || 0) - (a.bill_amount || 0)
+                if (cardSort === 'amount_low') return (a.bill_amount || 0) - (b.bill_amount || 0)
+                return 0
+              })
+              .map(card => (
+                <ItemCard
+                  key={card.id}
+                  item={card}
+                  type="card"
+                  onTogglePaid={() => togglePaid('card', card)}
+                  onDelete={() => handleDelete('card', card.id)}
+                  onUpdateBill={(val) => updateBillAmount(card.id, val)}
+                  onUpdateTotalPaid={(val) => updateTotalPaid('card', card.id, val)}
+                  onUpdateNotes={(val) => updateNotes('card', card.id, val)}
+                />
+              ))}
           </div>
         </section>
 
         {/* EMIs & Loans Section */}
         <section>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em]">EMIs & Loans</h2>
-            <button
-              onClick={() => navigate('/loans')}
-              className="text-sm font-bold text-indigo-600 hover:text-indigo-700"
-            >
-              + Add Loan
-            </button>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest">EMIs & Loans</h2>
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sort By</span>
+                <select 
+                  value={loanSort}
+                  onChange={(e) => setLoanSort(e.target.value)}
+                  className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
+                >
+                  <option value="none">Default</option>
+                  <option value="due">Due Day (1-31)</option>
+                  <option value="amount_high">Amount (High-Low)</option>
+                  <option value="amount_low">Amount (Low-High)</option>
+                  <option value="paid_most">Most Paid</option>
+                  <option value="paid_least">Least Paid</option>
+                </select>
+              </div>
+              <button
+                onClick={() => navigate('/loans')}
+                className="text-sm font-bold text-indigo-600 hover:text-indigo-700"
+              >
+                + Add Loan
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-1 gap-4">
-            {loans.map(loan => {
-              const state = getCurrentLoanState(loan)
-              return (
-                <div key={loan.id} className="bg-white border border-slate-100 rounded-2xl py-4 px-6 flex items-center gap-12 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all duration-300 group">
+          <div className="grid grid-cols-1 gap-3">
+            {[...loans]
+              .map(l => ({ ...l, state: getCurrentLoanState(l) }))
+              .sort((a, b) => {
+                if (loanSort === 'due') {
+                  const dayA = a.state.nextEmiDate ? new Date(a.state.nextEmiDate).getDate() : 99
+                  const dayB = b.state.nextEmiDate ? new Date(b.state.nextEmiDate).getDate() : 99
+                  return dayA - dayB
+                }
+                if (loanSort === 'amount_high') {
+                  return (b.emiAmount || 0) - (a.emiAmount || 0)
+                }
+                if (loanSort === 'amount_low') {
+                  return (a.emiAmount || 0) - (b.emiAmount || 0)
+                }
+                if (loanSort === 'paid_most') {
+                  return b.state.emisPaid - a.state.emisPaid
+                }
+                if (loanSort === 'paid_least') {
+                  return a.state.emisPaid - b.state.emisPaid
+                }
+                return 0
+              })
+              .map(loan => {
+                const state = loan.state
+                return (
+                <div key={loan.id} className="bg-white border border-gray-200 rounded-xl py-3 px-6 flex items-center gap-12 transition-all">
                   <div className="flex flex-col w-[240px] shrink-0">
-                    <span className="text-lg font-semibold text-slate-800 truncate tracking-tight leading-tight group-hover:text-indigo-600 transition-colors">{loan.nickname}</span>
-                    <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mt-1">Loan Profile</span>
+                    <span className="text-sm font-medium text-gray-900 truncate">{loan.nickname}</span>
+                    <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mt-0.5">Loan Profile</span>
                   </div>
 
-                  <div className="grid grid-cols-[120px_160px_100px] gap-4 text-base text-slate-500 font-medium shrink-0">
+                  <div className="grid grid-cols-[120px_200px_100px] gap-4 text-sm text-gray-500 shrink-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[65px]">Next Due</span>
-                      <span className="text-slate-700 font-semibold">{getOrdinal(new Date(state.nextEmiDate).getDate())}</span>
+                      <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[65px]">Next Due</span>
+                      <span className="text-gray-700 font-medium">{getOrdinal(new Date(state.nextEmiDate).getDate())}</span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[65px]">EMI Amt</span>
-                      <span className="font-mono font-bold text-lg text-slate-800">
-                        <span className="text-indigo-600/60 mr-0.5 font-sans">₹</span>{(loan.emiAmount || 0).toLocaleString('en-IN')}
+                      <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[75px]">EMI Amt</span>
+                      <span className="font-semibold text-gray-900">
+                        <span className="text-gray-400 mr-0.5 font-sans font-normal">₹</span>{(loan.emiAmount || 0).toLocaleString('en-IN')}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[45px]">Term</span>
-                      <span className="text-indigo-600 font-semibold text-lg">{state.emisPaid + 1}/{loan.tenureMonths}</span>
+                      <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[45px]">Term</span>
+                      <span className="text-green-600 font-semibold">{state.emisPaid + 1}/{loan.tenureMonths}</span>
                     </div>
                   </div>
 
@@ -309,43 +403,91 @@ export default function Dashboard({ session }) {
 
         {/* Subscriptions Section */}
         <section>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em]">Subscriptions</h2>
-            <button onClick={() => setShowModal('subscription')} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">+ Add Subscription</button>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest">Subscriptions</h2>
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sort By</span>
+                <select 
+                  value={subscriptionSort}
+                  onChange={(e) => setSubscriptionSort(e.target.value)}
+                  className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
+                >
+                  <option value="none">Default</option>
+                  <option value="due">Due Day (1-31)</option>
+                  <option value="amount_high">Amount (High-Low)</option>
+                  <option value="amount_low">Amount (Low-High)</option>
+                </select>
+              </div>
+              <button onClick={() => setShowModal('subscription')} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">+ Add Subscription</button>
+            </div>
           </div>
           <div className="grid grid-cols-1 gap-4">
             {subscriptions.length === 0 ? (
               <p className="text-base text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No subscriptions added</p>
-            ) : subscriptions.map(sub => (
-              <ItemCard
-                key={sub.id}
-                item={sub}
-                type="subscription"
-                onTogglePaid={() => togglePaid('subscription', sub)}
-                onDelete={() => handleDelete('subscription', sub.id)}
-              />
-            ))}
+            ) : [...subscriptions]
+              .sort((a, b) => {
+                if (subscriptionSort === 'due') return (a.due_date || 99) - (b.due_date || 99)
+                if (subscriptionSort === 'amount_high') return (b.amount || 0) - (a.amount || 0)
+                if (subscriptionSort === 'amount_low') return (a.amount || 0) - (b.amount || 0)
+                return 0
+              })
+              .map(sub => (
+                <ItemCard
+                  key={sub.id}
+                  item={sub}
+                  type="subscription"
+                  onTogglePaid={() => togglePaid('subscription', sub)}
+                  onDelete={() => handleDelete('subscription', sub.id)}
+                  onUpdateTotalPaid={(val) => updateTotalPaid('subscription', sub.id, val)}
+                  onUpdateNotes={(val) => updateNotes('subscription', sub.id, val)}
+                />
+              ))}
           </div>
         </section>
 
         {/* Other Expenses Section */}
         <section>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-[0.2em]">Other Expenses</h2>
-            <button onClick={() => setShowModal('expense')} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">+ Add Expense</button>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest">Other Expenses</h2>
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sort By</span>
+                <select 
+                  value={expenseSort}
+                  onChange={(e) => setExpenseSort(e.target.value)}
+                  className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
+                >
+                  <option value="none">Default</option>
+                  <option value="due">Due Day (1-31)</option>
+                  <option value="amount_high">Amount (High-Low)</option>
+                  <option value="amount_low">Amount (Low-High)</option>
+                </select>
+              </div>
+              <button onClick={() => setShowModal('expense')} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">+ Add Expense</button>
+            </div>
           </div>
           <div className="grid grid-cols-1 gap-4">
             {expenses.length === 0 ? (
               <p className="text-base text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No expenses added</p>
-            ) : expenses.map(exp => (
-              <ItemCard
-                key={exp.id}
-                item={exp}
-                type="expense"
-                onTogglePaid={() => togglePaid('expense', exp)}
-                onDelete={() => handleDelete('expense', exp.id)}
-              />
-            ))}
+            ) : [...expenses]
+              .sort((a, b) => {
+                if (expenseSort === 'due') return (a.due_date || 99) - (b.due_date || 99)
+                if (expenseSort === 'amount_high') return (b.amount || 0) - (a.amount || 0)
+                if (expenseSort === 'amount_low') return (a.amount || 0) - (b.amount || 0)
+                return 0
+              })
+              .map(exp => (
+                <ItemCard
+                  key={exp.id}
+                  item={exp}
+                  type="expense"
+                  onTogglePaid={() => togglePaid('expense', exp)}
+                  onDelete={() => handleDelete('expense', exp.id)}
+                  onUpdateTotalPaid={(val) => updateTotalPaid('expense', exp.id, val)}
+                  onUpdateNotes={(val) => updateNotes('expense', exp.id, val)}
+                />
+              ))}
           </div>
         </section>
 
@@ -382,59 +524,59 @@ function getOrdinal(n) {
   return n + (s[(v - 20) % 10] || s[v] || s[0])
 }
 
-function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill }) {
+function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTotalPaid, onUpdateNotes }) {
   const [showDetails, setShowDetails] = useState(false)
+  const [isEditingTotalPaid, setIsEditingTotalPaid] = useState(false)
+  const [isEditingNotes, setIsEditingNotes] = useState(false)
   const amount = type === 'card' ? item.bill_amount : item.amount
   const isPaid = item.paid
 
-  // Local state for the input to prevent typing lag
+  // Local state for the inputs to prevent typing lag
   const [localAmount, setLocalAmount] = useState(amount || '')
+  const [localTotalPaid, setLocalTotalPaid] = useState(item.total_paid || 0)
+  const [localNotes, setLocalNotes] = useState(item.notes || '')
 
   // Update local state if the parent amount changes
   useEffect(() => {
     setLocalAmount(amount || '')
-  }, [amount])
+    setLocalTotalPaid(item.total_paid || 0)
+    setLocalNotes(item.notes || '')
+  }, [amount, item.total_paid, item.notes])
 
-  const handleBlur = () => {
-    if (localAmount !== amount) {
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
       onUpdateBill(localAmount)
     }
   }
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.target.blur() // Trigger handleBlur
-    }
-  }
-
   return (
-    <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md hover:border-indigo-100 transition-all duration-300">
-      <div className="py-4 px-6 flex items-center gap-12">
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden transition-all">
+      <div className="py-3 px-6 flex items-center gap-12">
         {/* Left: Nickname & Details Toggle (Fixed Width) */}
         <div className="flex flex-col w-[240px] shrink-0">
-          <span className="text-lg font-semibold text-slate-800 truncate tracking-tight leading-tight group-hover:text-indigo-600 transition-colors">{item.nickname}</span>
+          <span className="text-sm font-medium text-gray-900 truncate">{item.nickname}</span>
           <button 
             onClick={() => setShowDetails(!showDetails)}
-            className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 mt-1 text-left transition-colors tracking-widest uppercase"
+            className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 mt-0.5 text-left transition-colors tracking-widest uppercase"
           >
             <span>{showDetails ? '▴ Hide Details' : '▾ Show Details'}</span>
           </button>
         </div>
 
         {/* Middle: Aligned Info Columns (Fixed Widths for Perfect Alignment) */}
-        <div className="grid grid-cols-[120px_160px_100px] gap-4 text-base text-slate-500 font-medium shrink-0">
+        <div className="grid grid-cols-[120px_200px_100px] gap-4 text-sm text-gray-500 shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[35px]">Due</span>
-            <span className="text-slate-700 font-semibold">{item.due_date ? getOrdinal(item.due_date) : '—'}</span>
+            <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[35px]">Due</span>
+            <span className="text-gray-700 font-medium">{item.due_date ? getOrdinal(item.due_date) : '—'}</span>
           </div>
           
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[55px]">Amount</span>
+            <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[75px]">Amount</span>
             {isPaid ? (
               <span className="text-emerald-600 font-bold text-[10px] bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100 tracking-widest uppercase">Paid</span>
             ) : (
-              <span className="font-mono font-bold text-lg text-slate-800">
-                <span className="text-indigo-600/60 mr-0.5 font-sans">₹</span>{(amount || 0).toLocaleString('en-IN')}
+              <span className="font-semibold text-gray-900">
+                <span className="text-gray-400 mr-0.5 font-sans font-normal">₹</span>{(amount || 0).toLocaleString('en-IN')}
               </span>
             )}
           </div>
@@ -452,15 +594,24 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill }) {
         {/* Right: Actions (Pushed to end) */}
         <div className="flex-1 flex items-center gap-4 justify-end">
           {type === 'card' && !isPaid && (
-            <input 
-              type="number"
-              value={localAmount}
-              onChange={(e) => setLocalAmount(e.target.value)}
-              onBlur={handleBlur}
-              onKeyDown={handleKeyDown}
-              placeholder="Set bill"
-              className="w-24 px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/30 transition-all"
-            />
+            <div className="flex items-center gap-2">
+              <input 
+                type="number"
+                value={localAmount}
+                onChange={(e) => setLocalAmount(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Set bill"
+                className="w-24 px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/30 transition-all"
+              />
+              {localAmount.toString() !== (amount || '').toString() && (
+                <button 
+                  onClick={() => onUpdateBill(localAmount)}
+                  className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
+                >
+                  Save
+                </button>
+              )}
+            </div>
           )}
 
           {/* Only show Mark Paid for Credit Cards */}
@@ -489,7 +640,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill }) {
       </div>
 
       {showDetails && (
-        <div className="bg-slate-50/50 border-t border-slate-100 px-8 py-4 grid grid-cols-2 md:grid-cols-4 gap-8">
+        <div className="bg-slate-50/50 border-t border-slate-100 px-8 py-4 grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-3">
           {type === 'card' && (
             <div className="space-y-0.5">
               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Full Card Name</p>
@@ -498,8 +649,36 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill }) {
           )}
 
           <div className="space-y-0.5">
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total Paid</p>
-            <p className="text-sm font-mono font-semibold text-slate-700">{formatINR(item.total_paid || 0)}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total Paid</p>
+              <button 
+                onClick={() => setIsEditingTotalPaid(!isEditingTotalPaid)}
+                className="text-[9px] font-bold text-indigo-500 hover:text-indigo-600 uppercase tracking-widest"
+              >
+                {isEditingTotalPaid ? 'Cancel' : 'Edit'}
+              </button>
+            </div>
+            {isEditingTotalPaid ? (
+              <div className="flex items-center gap-2">
+                <input 
+                  type="number"
+                  value={localTotalPaid}
+                  onChange={(e) => setLocalTotalPaid(e.target.value)}
+                  className="w-24 px-2 py-0.5 text-xs font-mono border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                />
+                <button 
+                  onClick={() => {
+                    onUpdateTotalPaid(localTotalPaid)
+                    setIsEditingTotalPaid(false)
+                  }}
+                  className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
+                >
+                  Save
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm font-mono font-semibold text-slate-700">{formatINR(item.total_paid || 0)}</p>
+            )}
           </div>
           
           {type === 'card' && (
@@ -521,6 +700,44 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill }) {
               )}
             </>
           )}
+
+          <div className="space-y-0.5 col-span-2">
+            <div className="flex items-center gap-2">
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Notes</p>
+              <button 
+                onClick={() => setIsEditingNotes(!isEditingNotes)}
+                className="text-[9px] font-bold text-indigo-500 hover:text-indigo-600 uppercase tracking-widest"
+              >
+                {isEditingNotes ? 'Cancel' : (item.notes ? 'Edit' : '+ Add Note')}
+              </button>
+            </div>
+            {isEditingNotes ? (
+              <div className="flex flex-col gap-2 mt-1">
+                <textarea 
+                  value={localNotes}
+                  onChange={(e) => setLocalNotes(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                  rows="2"
+                  placeholder="Enter note..."
+                />
+                <button 
+                  onClick={() => {
+                    onUpdateNotes(localNotes)
+                    setIsEditingNotes(false)
+                  }}
+                  className="self-end px-3 py-1 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 uppercase tracking-widest transition-all"
+                >
+                  Save
+                </button>
+              </div>
+            ) : (
+              item.notes ? (
+                <p className="text-sm text-slate-600 italic">"{item.notes}"</p>
+              ) : (
+                <p className="text-xs text-slate-400 italic">No notes added</p>
+              )
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -538,6 +755,7 @@ function AddModal({ type, onClose, onAdd }) {
   const [waiverAmount, setWaiverAmount] = useState('')
   const [totalMonths, setTotalMonths] = useState('')
   const [currentMonth, setCurrentMonth] = useState('0')
+  const [notes, setNotes] = useState('')
 
   const titles = {
     card: 'Add Credit Card',
@@ -553,6 +771,7 @@ function AddModal({ type, onClose, onAdd }) {
       nickname,
       due_date: dueDate,
       paid: false,
+      notes: notes,
     }
 
     if (type === 'card') {
@@ -685,6 +904,17 @@ function AddModal({ type, onClose, onAdd }) {
               )}
             </>
           )}
+
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Notes (Optional)</label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
+              placeholder="Add a reminder or detail..."
+              rows="2"
+            />
+          </div>
 
           <button
             type="submit"

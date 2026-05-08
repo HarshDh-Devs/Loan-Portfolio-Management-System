@@ -31,9 +31,14 @@ export default function Navbar({ session, activePage }) {
       )}
 
       <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-        <span className="text-lg font-semibold text-gray-900 cursor-pointer" onClick={() => navigate('/')}>
-          Loan <span className="text-green-600">Portfolio</span> Management System
-        </span>
+        <div className="flex flex-col cursor-pointer" onClick={() => navigate('/')}>
+          <span className="text-lg font-semibold text-gray-900 leading-tight">
+            Smart <span className="text-green-600">Finance</span> Management System
+          </span>
+          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-tight mt-0.5">
+            Unified Command for Strategic Loan Optimization, Cards, and Expenses
+          </span>
+        </div>
 
         <div className="flex gap-1 text-sm">
           {navItems.map(item => (

@@ -21,11 +21,11 @@ export default function Login() {
       <div className="bg-white rounded-2xl border border-gray-200 p-10 max-w-sm w-full text-center shadow-sm">
 
         <div className="mb-6">
-          <h1 className="text-xl font-semibold text-gray-900 mb-1">
-            Loan <span className="text-green-600">Portfolio</span> Management System
+          <h1 className="text-xl font-semibold text-gray-900 mb-0.5">
+            Smart <span className="text-green-600">Finance</span> Management System
           </h1>
-          <p className="text-sm text-gray-400">
-            Track, analyze and optimize all your loans in one place.
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.15em]">
+            Unified Command for Strategic Loan Optimization, Cards, and Expenses
           </p>
         </div>
 
