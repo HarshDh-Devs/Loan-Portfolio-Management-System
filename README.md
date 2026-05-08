@@ -6,9 +6,9 @@ Most people find it impossible to track their finances correctly because everyth
 
 ---
 
-## The Solution: SmartDebt
+## The Solution: Personal Finance & Debt Optimization System 
 
-I built **SmartDebt** to be a practical tool for daily life. It brings all your financial liabilities into one clean dashboard so you can manage and optimize your money without the stress.
+I built **Personal Finance & Debt Optimization System ** to be a practical tool for daily life. It brings all your financial liabilities into one clean dashboard so you can manage and optimize your money without the stress.
 
 ---
 
