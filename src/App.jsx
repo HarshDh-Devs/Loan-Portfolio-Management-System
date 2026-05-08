@@ -8,6 +8,7 @@ import EditLoan from './pages/EditLoan'
 import LoanDetail from './pages/LoanDetail'
 import Simulator from './pages/Simulator'
 import Insights from './pages/Insights'
+import CardIntelligence from './pages/CardIntelligence'
 import Alerts from './pages/Alerts'
 
 export default function App() {
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/loan/:id" element={<LoanDetail session={session} />} />
         <Route path="/simulator" element={<Simulator session={session} />} />
         <Route path="/insights" element={<Insights session={session} />} />
+        <Route path="/card-intelligence" element={<CardIntelligence session={session} />} />
         <Route path="/alerts" element={<Alerts session={session} />} />
       </Routes>
     </BrowserRouter>

@@ -9,7 +9,8 @@ export default function Navbar({ session, activePage }) {
     { label: 'Loans', path: '/loans' },
     { label: 'Add Loan', path: '/add' },
     { label: 'Simulator', path: '/simulator' },
-    { label: 'Insights', path: '/insights' },
+    { label: 'Loan Insights', path: '/insights' },
+    { label: 'Card Insights', path: '/card-intelligence' },
     { label: 'Alerts', path: '/alerts' },
   ]
 

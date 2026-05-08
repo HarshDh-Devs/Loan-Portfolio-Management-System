@@ -364,12 +364,15 @@ One sentence: which to prioritise and the key reason.`
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar session={session} activePage="Insights" />
+      <Navbar session={session} activePage="Loan Insights" />
 
       <div className="max-w-5xl mx-auto px-8 py-8">
         <div className="mb-6">
-          <h1 className="text-xl font-semibold text-gray-900">AI Insights</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Powered by Groq · Llama 4 Scout</p>
+          <h1 className="text-xl font-semibold text-gray-900">Loan Portfolio Insights</h1>
+          <p className="text-sm text-gray-400 mt-0.5">Strategic optimization and interest-saving analysis for your active debt.</p>
+          <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mt-2">
+            Powered by Groq · Llama 4 Scout
+          </p>
         </div>
 
         {!insights && !loading && (
