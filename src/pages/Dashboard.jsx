@@ -384,7 +384,7 @@ export default function Dashboard({ session }) {
                       <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[45px]">Term</span>
                       <span className="text-green-600 font-semibold">{state.emisPaid + 1}/{loan.tenureMonths}</span>
                       {loan.type === 'Credit Card' && (
-                        <span className="ml-4 text-[10px] text-slate-400">
+                        <span className="ml-4 text-[11px] text-slate-400">
                           (Not reflected in total bill as it is included in credit card bill)
                         </span>
                       )}
