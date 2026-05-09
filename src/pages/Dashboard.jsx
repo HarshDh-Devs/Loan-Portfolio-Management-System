@@ -98,7 +98,7 @@ export default function Dashboard({ session }) {
     ...cards.filter(c => !c.paid).map(c => c.bill_amount || 0),
     ...subscriptions.filter(s => !s.paid).map(s => s.amount || 0),
     ...expenses.filter(e => !e.paid).map(e => e.amount || 0),
-    ...loans.map(l => l.emiAmount || 0) // Assuming loans are always "unpaid" in this view for now
+    ...loans.filter(l => l.type !== 'Credit Card').map(l => l.emiAmount || 0) // CC loans are excluded as they are part of the CC statement
   ].reduce((a, b) => a + b, 0)
 
   const difference = balance - totalBills
@@ -362,7 +362,14 @@ export default function Dashboard({ session }) {
                 <div key={loan.id} className="bg-white border border-gray-200 rounded-xl py-3 px-6 flex items-center gap-12 transition-all">
                   <div className="flex flex-col w-[240px] shrink-0">
                     <span className="text-sm font-medium text-gray-900 truncate">{loan.nickname}</span>
-                    <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mt-0.5">Loan Profile</span>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Loan Profile</span>
+                      {loan.type === 'Credit Card' && (
+                        <span className="text-[8px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/50 uppercase tracking-tighter">
+                          Not in Total (In CC Bill)
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-[120px_200px_100px] gap-4 text-sm text-gray-500 shrink-0">
@@ -620,7 +627,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
               onClick={onTogglePaid}
               className={`px-5 py-1.5 text-[10px] font-bold rounded-full border transition-all shadow-sm tracking-widest uppercase ${
                 isPaid 
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-600 cursor-default' 
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-600 cursor-pointer hover:bg-emerald-100' 
                 : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-500 hover:text-indigo-600 active:scale-95'
               }`}
             >
