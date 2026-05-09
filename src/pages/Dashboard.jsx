@@ -364,15 +364,10 @@ export default function Dashboard({ session }) {
                     <span className="text-sm font-medium text-gray-900 truncate">{loan.nickname}</span>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Loan Profile</span>
-                      {loan.type === 'Credit Card' && (
-                        <span className="text-[8px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/50 uppercase tracking-tighter">
-                          Not in Total (In CC Bill)
-                        </span>
-                      )}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-[120px_200px_100px] gap-4 text-sm text-gray-500 shrink-0">
+                  <div className="grid grid-cols-[120px_200px_auto] gap-4 text-sm text-gray-500 shrink-0">
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[65px]">Next Due</span>
                       <span className="text-gray-700 font-medium">{getOrdinal(new Date(state.nextEmiDate).getDate())}</span>
@@ -388,6 +383,11 @@ export default function Dashboard({ session }) {
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[45px]">Term</span>
                       <span className="text-green-600 font-semibold">{state.emisPaid + 1}/{loan.tenureMonths}</span>
+                      {loan.type === 'Credit Card' && (
+                        <span className="ml-4 text-[9px] font-bold text-amber-600 bg-amber-50/50 px-2.5 py-1 rounded border border-amber-200/30 uppercase tracking-tighter whitespace-nowrap shadow-sm">
+                          Not reflected in total bill as it is reflected in credit card bill
+                        </span>
+                      )}
                     </div>
                   </div>
 
