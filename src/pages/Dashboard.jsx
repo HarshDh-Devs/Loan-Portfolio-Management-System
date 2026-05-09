@@ -101,6 +101,13 @@ export default function Dashboard({ session }) {
     ...loans.filter(l => l.type !== 'Credit Card').map(l => l.emiAmount || 0) // CC loans are excluded as they are part of the CC statement
   ].reduce((a, b) => a + b, 0)
 
+  const creditCardBills = cards.filter(c => !c.paid).reduce((acc, c) => acc + (c.bill_amount || 0), 0)
+  const loanEmis = loans.filter(l => l.type !== 'Credit Card').reduce((acc, l) => acc + (l.emiAmount || 0), 0)
+  const otherExpenses = [
+    ...subscriptions.filter(s => !s.paid).map(s => s.amount || 0),
+    ...expenses.filter(e => !e.paid).map(e => e.amount || 0)
+  ].reduce((a, b) => a + b, 0)
+
   const difference = balance - totalBills
 
   const handleSaveBalance = async () => {
@@ -203,34 +210,40 @@ export default function Dashboard({ session }) {
       <Navbar session={session} activePage="Dashboard" />
 
       {/* Summary Bar */}
-      <div className="max-w-6xl mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white rounded-xl border border-gray-200 p-4 relative group">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Available Balance</p>
-            <div className="flex items-baseline gap-3">
-              <span className="text-2xl font-semibold text-gray-900">{formatINR(balance)}</span>
-              <button 
+      <div className="max-w-[1400px] mx-auto px-6 py-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+
+          {/* Main: Available Balance */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 min-h-[85px] flex flex-col justify-start">
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-wide leading-none">Available Balance</p>
+              <p className="text-[9px] invisible leading-none mt-1">(alignment)</p>
+            </div>
+            <div className="flex items-center gap-3 mt-1">
+              <span className="text-xl font-semibold text-gray-900 leading-none">{formatINR(balance)}</span>
+              <button
                 onClick={() => {
                   setBalanceInput(balance.toString())
                   setIsEditingBalance(!isEditingBalance)
                 }}
-                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity"
+                className="text-xs font-medium text-indigo-600 hover:text-indigo-700 leading-none"
               >
                 Edit
               </button>
             </div>
             {isEditingBalance && (
               <div className="mt-3 flex gap-2">
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   value={balanceInput}
                   onChange={(e) => setBalanceInput(e.target.value)}
-                  className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-50"
+                  className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-50"
                   placeholder="Amount"
+                  autoFocus
                 />
-                <button 
+                <button
                   onClick={handleSaveBalance}
-                  className="px-3 py-1.5 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 uppercase tracking-widest transition-all"
+                  className="px-3 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-all"
                 >
                   Save
                 </button>
@@ -238,22 +251,58 @@ export default function Dashboard({ session }) {
             )}
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Total Bills</p>
-            <span className="text-2xl font-semibold text-gray-900">{formatINR(totalBills)}</span>
+          {/* Main: Total Bills */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 min-h-[85px] flex flex-col justify-start">
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-wide leading-none">Total Bills</p>
+              <p className="text-[9px] invisible leading-none mt-1">(alignment)</p>
+            </div>
+            <span className="text-xl font-semibold text-gray-900 mt-1 leading-none">{formatINR(totalBills)}</span>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Difference</p>
-            <div className="flex items-baseline gap-2">
-              <span className={`text-2xl font-semibold ${difference >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+          {/* Main: Net Balance */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 min-h-[85px] flex flex-col justify-start">
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-wide leading-none">Net Balance</p>
+              <p className="text-[9px] invisible leading-none mt-1">(alignment)</p>
+            </div>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className={`text-xl font-semibold leading-none ${difference >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                 {formatINR(Math.abs(difference))}
               </span>
-              <span className={`text-[10px] font-bold uppercase tracking-widest ${difference >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-widest leading-none ${difference >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                 {difference >= 0 ? 'Surplus' : 'Deficit'}
               </span>
             </div>
           </div>
+
+          {/* Breakdown: Credit Cards */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 min-h-[85px] flex flex-col justify-start">
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-wide leading-none">Credit Card Bills</p>
+              <p className="text-[9px] invisible leading-none mt-1">(alignment)</p>
+            </div>
+            <span className="text-xl font-semibold text-gray-900 mt-1 leading-none">{formatINR(creditCardBills)}</span>
+          </div>
+
+          {/* Breakdown: Bank Loan EMIs */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 min-h-[85px] flex flex-col justify-start">
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-wide leading-none">Bank Loan EMIs</p>
+              <p className="text-[9px] text-gray-400 lowercase leading-none mt-1">(Excluding CC EMIs)</p>
+            </div>
+            <span className="text-xl font-semibold text-gray-900 mt-1 leading-none">{formatINR(loanEmis)}</span>
+          </div>
+
+          {/* Breakdown: Subscriptions & Misc */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 min-h-[85px] flex flex-col justify-start">
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-wide leading-none">Subs & Misc</p>
+              <p className="text-[9px] invisible leading-none mt-1">(alignment)</p>
+            </div>
+            <span className="text-xl font-semibold text-gray-900 mt-1 leading-none">{formatINR(otherExpenses)}</span>
+          </div>
+
         </div>
       </div>
 
@@ -266,7 +315,7 @@ export default function Dashboard({ session }) {
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sort By</span>
-                <select 
+                <select
                   value={cardSort}
                   onChange={(e) => setCardSort(e.target.value)}
                   className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
@@ -312,7 +361,7 @@ export default function Dashboard({ session }) {
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sort By</span>
-                <select 
+                <select
                   value={loanSort}
                   onChange={(e) => setLoanSort(e.target.value)}
                   className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
@@ -359,49 +408,49 @@ export default function Dashboard({ session }) {
               .map(loan => {
                 const state = loan.state
                 return (
-                <div key={loan.id} className="bg-white border border-gray-200 rounded-xl py-3 px-6 flex items-center gap-12 transition-all">
-                  <div className="flex flex-col w-[240px] shrink-0">
-                    <span className="text-sm font-medium text-gray-900 truncate">{loan.nickname}</span>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Loan Profile</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-[120px_200px_auto] gap-4 text-sm text-gray-500 shrink-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[65px]">Next Due</span>
-                      <span className="text-gray-700 font-medium">{getOrdinal(new Date(state.nextEmiDate).getDate())}</span>
+                  <div key={loan.id} className="bg-white border border-gray-200 rounded-xl py-3 px-6 flex items-center gap-12 transition-all">
+                    <div className="flex flex-col w-[240px] shrink-0">
+                      <span className="text-sm font-medium text-gray-900 truncate">{loan.nickname}</span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Loan Profile</span>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[75px]">EMI Amt</span>
-                      <span className="font-semibold text-gray-900">
-                        <span className="text-gray-400 mr-0.5 font-sans font-normal">₹</span>{(loan.emiAmount || 0).toLocaleString('en-IN')}
-                      </span>
-                    </div>
+                    <div className="grid grid-cols-[120px_200px_auto] gap-4 text-sm text-gray-500 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[65px]">Next Due</span>
+                        <span className="text-gray-700 font-medium">{getOrdinal(new Date(state.nextEmiDate).getDate())}</span>
+                      </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[45px]">Term</span>
-                      <span className="text-green-600 font-semibold">{state.emisPaid}/{loan.tenureMonths}</span>
-                      {loan.type === 'Credit Card' && (
-                        <span className="ml-4 text-[11px] text-slate-400">
-                          (Not reflected in total bill as it is included in credit card bill)
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[75px]">EMI Amt</span>
+                        <span className="font-semibold text-gray-900">
+                          <span className="text-gray-400 mr-0.5 font-sans font-normal">₹</span>{(loan.emiAmount || 0).toLocaleString('en-IN')}
                         </span>
-                      )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[45px]">Term</span>
+                        <span className="text-green-600 font-semibold">{state.emisPaid}/{loan.tenureMonths}</span>
+                        {loan.type === 'Credit Card' && (
+                          <span className="ml-4 text-[11px] text-slate-400">
+                            (Not reflected in total bill as it is included in credit card bill)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex-1 flex items-center gap-4 justify-end">
+                      <button
+                        onClick={() => navigate('/loans')}
+                        className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 uppercase tracking-widest transition-colors"
+                      >
+                        Manage in Loans
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex-1 flex items-center gap-4 justify-end">
-                    <button 
-                      onClick={() => navigate('/loans')}
-                      className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 uppercase tracking-widest transition-colors"
-                    >
-                      Manage in Loans
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
+                )
+              })}
             {loans.length === 0 && (
               <p className="text-base text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No active loans found</p>
             )}
@@ -415,7 +464,7 @@ export default function Dashboard({ session }) {
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sort By</span>
-                <select 
+                <select
                   value={subscriptionSort}
                   onChange={(e) => setSubscriptionSort(e.target.value)}
                   className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
@@ -460,7 +509,7 @@ export default function Dashboard({ session }) {
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sort By</span>
-                <select 
+                <select
                   value={expenseSort}
                   onChange={(e) => setExpenseSort(e.target.value)}
                   className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
@@ -562,7 +611,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
         {/* Left: Nickname & Details Toggle (Fixed Width) */}
         <div className="flex flex-col w-[240px] shrink-0">
           <span className="text-sm font-medium text-gray-900 truncate">{item.nickname}</span>
-          <button 
+          <button
             onClick={() => setShowDetails(!showDetails)}
             className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 mt-0.5 text-left transition-colors tracking-widest uppercase"
           >
@@ -576,7 +625,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
             <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[35px]">Due</span>
             <span className="text-gray-700 font-medium">{item.due_date ? getOrdinal(item.due_date) : '—'}</span>
           </div>
-          
+
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[75px]">Amount</span>
             {isPaid ? (
@@ -602,7 +651,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
         <div className="flex-1 flex items-center gap-4 justify-end">
           {type === 'card' && !isPaid && (
             <div className="flex items-center gap-2">
-              <input 
+              <input
                 type="number"
                 value={localAmount}
                 onChange={(e) => setLocalAmount(e.target.value)}
@@ -611,7 +660,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
                 className="w-24 px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/30 transition-all"
               />
               {localAmount.toString() !== (amount || '').toString() && (
-                <button 
+                <button
                   onClick={() => onUpdateBill(localAmount)}
                   className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
                 >
@@ -623,19 +672,18 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
 
           {/* Only show Mark Paid for Credit Cards */}
           {type === 'card' && (
-            <button 
+            <button
               onClick={onTogglePaid}
-              className={`px-5 py-1.5 text-[10px] font-bold rounded-full border transition-all shadow-sm tracking-widest uppercase ${
-                isPaid 
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-600 cursor-pointer hover:bg-emerald-100' 
-                : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-500 hover:text-indigo-600 active:scale-95'
-              }`}
+              className={`px-5 py-1.5 text-[10px] font-bold rounded-full border transition-all shadow-sm tracking-widest uppercase ${isPaid
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-600 cursor-pointer hover:bg-emerald-100'
+                  : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-500 hover:text-indigo-600 active:scale-95'
+                }`}
             >
               {isPaid ? 'Settled ✓' : 'Mark Paid'}
             </button>
           )}
 
-          <button 
+          <button
             onClick={onDelete}
             className="text-slate-400 hover:text-rose-600 transition-all p-1.5 rounded-lg hover:bg-rose-50 group/del"
             title="Delete Item"
@@ -659,7 +707,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total Paid</p>
-              <button 
+              <button
                 onClick={() => setIsEditingTotalPaid(!isEditingTotalPaid)}
                 className="text-[9px] font-bold text-indigo-500 hover:text-indigo-600 uppercase tracking-widest"
               >
@@ -668,13 +716,13 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
             </div>
             {isEditingTotalPaid ? (
               <div className="flex items-center gap-2">
-                <input 
+                <input
                   type="number"
                   value={localTotalPaid}
                   onChange={(e) => setLocalTotalPaid(e.target.value)}
                   className="w-24 px-2 py-0.5 text-xs font-mono border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
                 />
-                <button 
+                <button
                   onClick={() => {
                     onUpdateTotalPaid(localTotalPaid)
                     setIsEditingTotalPaid(false)
@@ -688,14 +736,14 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
               <p className="text-sm font-mono font-semibold text-slate-700">{formatINR(item.total_paid || 0)}</p>
             )}
           </div>
-          
+
           {type === 'card' && (
             <>
               <div className="space-y-0.5">
                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Annual Fee</p>
                 <p className="text-sm font-semibold text-slate-700">
-                  {item.annual_fee_type === 'LTF' 
-                    ? <span className="text-emerald-600">LTF</span> 
+                  {item.annual_fee_type === 'LTF'
+                    ? <span className="text-emerald-600">LTF</span>
                     : `${formatINR(item.annual_fee)} in ${item.fee_month}`
                   }
                 </p>
@@ -712,7 +760,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
           <div className="space-y-0.5 col-span-2">
             <div className="flex items-center gap-2">
               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Notes</p>
-              <button 
+              <button
                 onClick={() => setIsEditingNotes(!isEditingNotes)}
                 className="text-[9px] font-bold text-indigo-500 hover:text-indigo-600 uppercase tracking-widest"
               >
@@ -721,14 +769,14 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
             </div>
             {isEditingNotes ? (
               <div className="flex flex-col gap-2 mt-1">
-                <textarea 
+                <textarea
                   value={localNotes}
                   onChange={(e) => setLocalNotes(e.target.value)}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
                   rows="2"
                   placeholder="Enter note..."
                 />
-                <button 
+                <button
                   onClick={() => {
                     onUpdateNotes(localNotes)
                     setIsEditingNotes(false)
