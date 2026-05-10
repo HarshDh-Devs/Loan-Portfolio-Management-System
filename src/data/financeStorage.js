@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase'
 
-// ── Local Storage Keys ──────────────────────────────────────────────────────
+// ── Local Storage (cache for non-auth / offline read fallback) ───────────────
 const LOCAL_KEY = 'lpms_finance_data'
 
 function getDefaultData() {
@@ -16,78 +16,67 @@ function getDefaultData() {
 function getLocalData() {
   try {
     const raw = localStorage.getItem(LOCAL_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      return { ...getDefaultData(), ...parsed }
-    }
-    return getDefaultData()
+    return raw ? { ...getDefaultData(), ...JSON.parse(raw) } : getDefaultData()
   } catch {
     return getDefaultData()
   }
 }
 
 function saveLocalData(data) {
-  localStorage.setItem(LOCAL_KEY, JSON.stringify(data))
+  try {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(data))
+  } catch {
+    // Ignore quota / unavailability errors (e.g. private mode)
+  }
 }
 
-// ── Supabase helpers ────────────────────────────────────────────────────────
-async function getCloudData(session) {
-  try {
-    const { data, error } = await supabase
-      .from('finance_data')
-      .select('id, data')
-      .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
+// ── Supabase (cloud) ─────────────────────────────────────────────────────────
 
-    if (error) {
-      // Table may not exist yet — fall back to local
-      console.warn('finance_data table not found, using localStorage:', error.message)
-      return getLocalData()
-    }
-    return data && data.length > 0 ? { ...getDefaultData(), ...data[0].data } : getDefaultData()
-  } catch (err) {
-    console.warn('Cloud finance data fetch failed, using localStorage:', err)
-    return getLocalData()
-  }
+async function getCloudData(session) {
+  const { data, error } = await supabase
+    .from('finance_data')
+    .select('id, data')
+    .eq('user_id', session.user.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  if (error) throw error
+
+  const result = data?.length > 0
+    ? { ...getDefaultData(), ...data[0].data }
+    : getDefaultData()
+
+  saveLocalData(result) // keep local cache in sync for offline reads
+  return result
 }
 
 async function saveCloudData(session, financeData) {
-  try {
-    const { data: existing, error: selError } = await supabase
+  const { data: existing, error: selError } = await supabase
+    .from('finance_data')
+    .select('id')
+    .eq('user_id', session.user.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  if (selError) throw selError
+
+  if (existing?.length > 0) {
+    const { error } = await supabase
       .from('finance_data')
-      .select('id')
-      .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-
-    if (selError) {
-      // Table doesn't exist — fall back to local
-      saveLocalData(financeData)
-      return
-    }
-
-    if (existing && existing.length > 0) {
-      const { error } = await supabase
-        .from('finance_data')
-        .update({ data: financeData })
-        .eq('id', existing[0].id)
-      if (error) throw error
-    } else {
-      const { error } = await supabase
-        .from('finance_data')
-        .insert({ user_id: session.user.id, data: financeData })
-      if (error) throw error
-    }
-    // Also keep localStorage in sync
-    saveLocalData(financeData)
-  } catch (err) {
-    console.warn('Cloud finance data save failed, saving locally:', err)
-    saveLocalData(financeData)
+      .update({ data: financeData })
+      .eq('id', existing[0].id)
+    if (error) throw error
+  } else {
+    const { error } = await supabase
+      .from('finance_data')
+      .insert({ user_id: session.user.id, data: financeData })
+    if (error) throw error
   }
+
+  saveLocalData(financeData) // keep local cache in sync
 }
 
-// ── Public API ──────────────────────────────────────────────────────────────
+// ── Public API ───────────────────────────────────────────────────────────────
 
 export async function getFinanceData(session) {
   if (session) return await getCloudData(session)
@@ -99,7 +88,7 @@ export async function saveFinanceData(session, data) {
   else saveLocalData(data)
 }
 
-// ── Cards ───────────────────────────────────────────────────────────────────
+// ── Cards ────────────────────────────────────────────────────────────────────
 
 export async function getCards(session) {
   const d = await getFinanceData(session)
@@ -126,7 +115,7 @@ export async function deleteCard(session, id) {
   await saveFinanceData(session, d)
 }
 
-// ── Subscriptions ───────────────────────────────────────────────────────────
+// ── Subscriptions ────────────────────────────────────────────────────────────
 
 export async function getSubscriptions(session) {
   const d = await getFinanceData(session)
@@ -153,7 +142,7 @@ export async function deleteSubscription(session, id) {
   await saveFinanceData(session, d)
 }
 
-// ── Manual EMIs ─────────────────────────────────────────────────────────────
+// ── Manual EMIs ──────────────────────────────────────────────────────────────
 
 export async function getManualEmis(session) {
   const d = await getFinanceData(session)
@@ -180,7 +169,7 @@ export async function deleteManualEmi(session, id) {
   await saveFinanceData(session, d)
 }
 
-// ── Expenses ────────────────────────────────────────────────────────────────
+// ── Expenses ─────────────────────────────────────────────────────────────────
 
 export async function getExpenses(session) {
   const d = await getFinanceData(session)
@@ -207,7 +196,7 @@ export async function deleteExpense(session, id) {
   await saveFinanceData(session, d)
 }
 
-// ── Settings (Available Balance) ────────────────────────────────────────────
+// ── Settings ─────────────────────────────────────────────────────────────────
 
 export async function getSettings(session) {
   const d = await getFinanceData(session)
@@ -219,16 +208,3 @@ export async function saveSettings(session, settings) {
   d.settings = { ...(d.settings || {}), ...settings }
   await saveFinanceData(session, d)
 }
-
-// ── Supabase SQL migration hint ─────────────────────────────────────────────
-// Run this in your Supabase SQL editor to enable cloud sync for finance data:
-//
-// create table if not exists finance_data (
-//   id uuid primary key default gen_random_uuid(),
-//   user_id uuid references auth.users(id) on delete cascade not null,
-//   data jsonb not null default '{}',
-//   created_at timestamptz default now()
-// );
-// alter table finance_data enable row level security;
-// create policy "Users manage own finance data" on finance_data
-//   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);

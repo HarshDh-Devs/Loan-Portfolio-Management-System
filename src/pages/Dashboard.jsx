@@ -6,7 +6,6 @@ import {
   getSettings, saveSettings,
   getCards, addCard, updateCard, deleteCard,
   getSubscriptions, addSubscription, updateSubscription, deleteSubscription,
-  getManualEmis, addManualEmi, updateManualEmi, deleteManualEmi,
   getExpenses, addExpense, updateExpense, deleteExpense
 } from '../data/financeStorage'
 import { formatINR, formatNumber } from '../utils/format'
@@ -168,6 +167,21 @@ export default function Dashboard({ session }) {
   const updateTotalPaid = async (type, id, val) => {
     const amount = parseFloat(val) || 0
     const updates = { total_paid: amount }
+    if (type === 'card') {
+      await updateCard(session, id, updates)
+      setCards(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
+    } else if (type === 'subscription') {
+      await updateSubscription(session, id, updates)
+      setSubscriptions(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s))
+    } else if (type === 'expense') {
+      await updateExpense(session, id, updates)
+      setExpenses(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e))
+    }
+  }
+
+  const updateDueDate = async (type, id, val) => {
+    const day = parseInt(val) || null
+    const updates = { due_date: day }
     if (type === 'card') {
       await updateCard(session, id, updates)
       setCards(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
@@ -349,6 +363,7 @@ export default function Dashboard({ session }) {
                   onUpdateBill={(val) => updateBillAmount(card.id, val)}
                   onUpdateTotalPaid={(val) => updateTotalPaid('card', card.id, val)}
                   onUpdateNotes={(val) => updateNotes('card', card.id, val)}
+                  onUpdateDueDate={(val) => updateDueDate('card', card.id, val)}
                 />
               ))}
           </div>
@@ -497,6 +512,7 @@ export default function Dashboard({ session }) {
                   onDelete={() => handleDelete('subscription', sub.id)}
                   onUpdateTotalPaid={(val) => updateTotalPaid('subscription', sub.id, val)}
                   onUpdateNotes={(val) => updateNotes('subscription', sub.id, val)}
+                  onUpdateDueDate={(val) => updateDueDate('subscription', sub.id, val)}
                 />
               ))}
           </div>
@@ -542,6 +558,7 @@ export default function Dashboard({ session }) {
                   onDelete={() => handleDelete('expense', exp.id)}
                   onUpdateTotalPaid={(val) => updateTotalPaid('expense', exp.id, val)}
                   onUpdateNotes={(val) => updateNotes('expense', exp.id, val)}
+                  onUpdateDueDate={(val) => updateDueDate('expense', exp.id, val)}
                 />
               ))}
           </div>
@@ -580,10 +597,11 @@ function getOrdinal(n) {
   return n + (s[(v - 20) % 10] || s[v] || s[0])
 }
 
-function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTotalPaid, onUpdateNotes }) {
+function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTotalPaid, onUpdateNotes, onUpdateDueDate }) {
   const [showDetails, setShowDetails] = useState(false)
   const [isEditingTotalPaid, setIsEditingTotalPaid] = useState(false)
   const [isEditingNotes, setIsEditingNotes] = useState(false)
+  const [isEditingDueDate, setIsEditingDueDate] = useState(false)
   const amount = type === 'card' ? item.bill_amount : item.amount
   const isPaid = item.paid
 
@@ -591,13 +609,15 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
   const [localAmount, setLocalAmount] = useState(amount || '')
   const [localTotalPaid, setLocalTotalPaid] = useState(item.total_paid || 0)
   const [localNotes, setLocalNotes] = useState(item.notes || '')
+  const [localDueDate, setLocalDueDate] = useState(item.due_date || '')
 
   // Update local state if the parent amount changes
   useEffect(() => {
     setLocalAmount(amount || '')
     setLocalTotalPaid(item.total_paid || 0)
     setLocalNotes(item.notes || '')
-  }, [amount, item.total_paid, item.notes])
+    setLocalDueDate(item.due_date || '')
+  }, [amount, item.total_paid, item.notes, item.due_date])
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -623,7 +643,47 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
         <div className="grid grid-cols-[120px_200px_100px] gap-4 text-sm text-gray-500 shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[35px]">Due</span>
-            <span className="text-gray-700 font-medium">{item.due_date ? getOrdinal(item.due_date) : '—'}</span>
+            {isEditingDueDate ? (
+              <>
+                <input
+                  type="number"
+                  min="1" max="31"
+                  value={localDueDate}
+                  onChange={(e) => setLocalDueDate(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { onUpdateDueDate(localDueDate); setIsEditingDueDate(false) }
+                    if (e.key === 'Escape') setIsEditingDueDate(false)
+                  }}
+                  autoFocus
+                  className="w-12 px-1.5 py-0.5 text-xs font-mono border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-center"
+                />
+                <button
+                  onClick={() => { onUpdateDueDate(localDueDate); setIsEditingDueDate(false) }}
+                  className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
+                >
+                  ✓
+                </button>
+                <button
+                  onClick={() => setIsEditingDueDate(false)}
+                  className="text-[9px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest"
+                >
+                  ✕
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="text-gray-700 font-medium">{item.due_date ? getOrdinal(item.due_date) : '—'}</span>
+                <button
+                  onClick={() => setIsEditingDueDate(true)}
+                  title="Edit due date"
+                  className="text-slate-300 hover:text-indigo-500 transition-colors ml-0.5"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536M9 11l6.364-6.364a2 2 0 112.828 2.828L11.828 13.828A2 2 0 0110 14.4V16h1.6a2 2 0 001.414-.586l.172-.172" />
+                  </svg>
+                </button>
+              </>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
