@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { signInWithGoogle, signOut } from '../data/cloudStorage'
 
-export default function Navbar({ session, activePage }) {
+export default function Navbar({ session, activePage, darkMode = false, onToggleDarkMode }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const navigate = useNavigate()
 
@@ -69,6 +69,28 @@ export default function Navbar({ session, activePage }) {
 
           {/* User Profile & Hamburger */}
           <div className="flex items-center gap-3">
+            {onToggleDarkMode && (
+              <button
+                type="button"
+                onClick={onToggleDarkMode}
+                className="dashboard-theme-toggle flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 bg-white hover:bg-gray-50 transition-colors"
+                aria-pressed={darkMode}
+                title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {darkMode ? (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.364 6.364l-1.414-1.414M7.05 7.05 5.636 5.636m12.728 0L16.95 7.05M7.05 16.95l-1.414 1.414M12 8a4 4 0 100 8 4 4 0 000-8z" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+                  </svg>
+                )}
+                <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wider">
+                  {darkMode ? 'Light' : 'Dark'}
+                </span>
+              </button>
+            )}
             <div className="hidden sm:flex items-center gap-2">
               {session && (
                 <div className="flex items-center gap-2 mr-2">
@@ -180,4 +202,4 @@ export default function Navbar({ session, activePage }) {
       </nav>
     </>
   )
-}
+}
