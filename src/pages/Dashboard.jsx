@@ -1,14 +1,45 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import { getLoans } from '../data/hybridStorage'
 import { getCurrentLoanState } from '../math/engine'
 import {
   getSettings, saveSettings,
-  getCards, addCard, updateCard, deleteCard,
+  getCards, addCard, updateCard, deleteCard, reorderCards, patchFinanceData,
   getSubscriptions, addSubscription, updateSubscription, deleteSubscription,
   getExpenses, addExpense, updateExpense, deleteExpense
 } from '../data/financeStorage'
-import { formatINR, formatNumber } from '../utils/format'
+import { formatINR } from '../utils/format'
+import {
+  CARD_STATUS,
+  MONTH_NAMES,
+  cardRowClass,
+  compareUpcomingDue,
+  ensureCardSortOrder,
+  formatDueCaption,
+  getCardDueInfo,
+  getFeeWaiverInfo,
+  getUpcomingDueCycleKey,
+  getUpcomingDueDate,
+  monthKey,
+  nextCardCycleUpdates,
+  normalizeMonthKey,
+} from '../utils/cardDue'
 import Navbar from '../components/Navbar'
 
 export default function Dashboard({ session }) {
@@ -23,11 +54,17 @@ export default function Dashboard({ session }) {
   const [expenses, setExpenses] = useState([])
   const [loans, setLoans] = useState([])
   const [loanSort, setLoanSort] = useState('none')
-  const [cardSort, setCardSort] = useState('none')
+  const [cardSort, setCardSort] = useState('due')
   const [subscriptionSort, setSubscriptionSort] = useState('none')
   const [expenseSort, setExpenseSort] = useState('none')
+  const [activeCardId, setActiveCardId] = useState(null)
+  const [editingCard, setEditingCard] = useState(null)
 
   const [showModal, setShowModal] = useState(null) // 'card', 'subscription', 'emi', 'expense'
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  )
 
   useEffect(() => {
     async function loadData() {
@@ -48,7 +85,7 @@ export default function Dashboard({ session }) {
         let cardsData = c
         let subsData = sub
         let expsData = exp
-        const persist = []
+        let cardsChanged = false
 
         // Calendar-month rollover is only for subscriptions/expenses.
         // Credit card bills follow each card's due day, not the 1st.
@@ -61,23 +98,27 @@ export default function Dashboard({ session }) {
             ...item,
             total_paid: (item.total_paid || 0) + (item.amount || 0)
           }))
-          persist.push(
-            ...subsData.map(item => updateSubscription(session, item.id, { total_paid: item.total_paid })),
-            ...expsData.map(item => updateExpense(session, item.id, { total_paid: item.total_paid })),
-            saveSettings(session, { ...s, last_reset_month: currentMonthKey })
-          )
-        } else if (!lastReset) {
-          persist.push(saveSettings(session, { ...s, last_reset_month: currentMonthKey }))
         }
 
         cardsData = cardsData.map(card => {
           const updates = nextCardCycleUpdates(card, now, monthChanged)
           if (!updates) return card
-          persist.push(updateCard(session, card.id, updates))
+          cardsChanged = true
           return { ...card, ...updates }
         })
 
-        if (persist.length) await Promise.all(persist)
+        const ordered = ensureCardSortOrder(cardsData)
+        cardsData = ordered.cards
+        if (ordered.changed) cardsChanged = true
+
+        if (monthChanged || !lastReset || cardsChanged) {
+          await patchFinanceData(session, (d) => {
+            d.cards = cardsData
+            d.subscriptions = subsData
+            d.expenses = expsData
+            d.settings = { ...(d.settings || {}), ...(s || {}), last_reset_month: currentMonthKey }
+          })
+        }
 
         setCards(cardsData)
         setSubscriptions(subsData)
@@ -109,6 +150,45 @@ export default function Dashboard({ session }) {
   ].reduce((a, b) => a + b, 0)
 
   const difference = balance - totalBills
+
+  const sortedCards = useMemo(() => {
+    return [...cards].sort((a, b) => {
+      if (cardSort === 'none') return (a.sort_order ?? 0) - (b.sort_order ?? 0)
+      if (cardSort === 'due') return compareUpcomingDue(a, b)
+      if (cardSort === 'amount_high') return (b.bill_amount || 0) - (a.bill_amount || 0)
+      if (cardSort === 'amount_low') return (a.bill_amount || 0) - (b.bill_amount || 0)
+      return 0
+    })
+  }, [cards, cardSort])
+
+  const canDragCards = cardSort === 'none'
+  const activeCard = activeCardId ? cards.find(c => c.id === activeCardId) : null
+
+  const handleCardDragStart = (event) => {
+    setActiveCardId(event.active.id)
+  }
+
+  const handleCardDragEnd = async (event) => {
+    const { active, over } = event
+    setActiveCardId(null)
+    if (!over || active.id === over.id) return
+    const ids = sortedCards.map(c => c.id)
+    const oldIndex = ids.indexOf(active.id)
+    const newIndex = ids.indexOf(over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    const reordered = arrayMove(sortedCards, oldIndex, newIndex).map((c, i) => ({ ...c, sort_order: i }))
+    setCards(reordered)
+    await reorderCards(session, reordered.map(c => c.id))
+  }
+
+  const handleSaveEditedCard = async (data) => {
+    if (!editingCard) return
+    const updates = { ...data }
+    if (updates.due_date) updates.bill_cycle = getUpcomingDueCycleKey(updates.due_date)
+    await updateCard(session, editingCard.id, updates)
+    setCards(prev => prev.map(c => c.id === editingCard.id ? { ...c, ...updates } : c))
+    setEditingCard(null)
+  }
 
   const handleSaveBalance = async () => {
     const newBalance = parseFloat(balanceInput) || 0
@@ -328,7 +408,12 @@ export default function Dashboard({ session }) {
         {/* Credit Cards Section */}
         <section>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest">Credit Cards</h2>
+            <div>
+              <h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest">Credit Cards</h2>
+              {canDragCards && cards.length > 1 && (
+                <p className="text-[10px] text-slate-400 mt-1">Drag the handle to save your own order</p>
+              )}
+            </div>
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sort By</span>
@@ -337,8 +422,8 @@ export default function Dashboard({ session }) {
                   onChange={(e) => setCardSort(e.target.value)}
                   className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
                 >
-                  <option value="none">Default</option>
                   <option value="due">Upcoming due</option>
+                  <option value="none">Default (drag)</option>
                   <option value="amount_high">Bill Amount (High-Low)</option>
                   <option value="amount_low">Bill Amount (Low-High)</option>
                 </select>
@@ -349,26 +434,50 @@ export default function Dashboard({ session }) {
           <div className="grid grid-cols-1 gap-4">
             {cards.length === 0 ? (
               <p className="text-base text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No credit cards added</p>
-            ) : [...cards]
-              .sort((a, b) => {
-                if (cardSort === 'due') return compareUpcomingDue(a, b)
-                if (cardSort === 'amount_high') return (b.bill_amount || 0) - (a.bill_amount || 0)
-                if (cardSort === 'amount_low') return (a.bill_amount || 0) - (b.bill_amount || 0)
-                return 0
-              })
-              .map(card => (
-                <ItemCard
-                  key={card.id}
-                  item={card}
-                  type="card"
-                  onTogglePaid={() => togglePaid('card', card)}
-                  onDelete={() => handleDelete('card', card.id)}
-                  onUpdateBill={(val) => updateBillAmount(card.id, val)}
-                  onUpdateTotalPaid={(val) => updateTotalPaid('card', card.id, val)}
-                  onUpdateNotes={(val) => updateNotes('card', card.id, val)}
-                  onUpdateDueDate={(val) => updateDueDate('card', card.id, val)}
-                />
-              ))}
+            ) : (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                modifiers={[restrictToVerticalAxis]}
+                onDragStart={handleCardDragStart}
+                onDragEnd={handleCardDragEnd}
+                onDragCancel={() => setActiveCardId(null)}
+              >
+                <SortableContext items={sortedCards.map(c => c.id)} strategy={verticalListSortingStrategy}>
+                  {sortedCards.map(card => (
+                    <SortableItemCard
+                      key={card.id}
+                      card={card}
+                      disabled={!canDragCards}
+                      onTogglePaid={() => togglePaid('card', card)}
+                      onDelete={() => handleDelete('card', card.id)}
+                      onUpdateBill={(val) => updateBillAmount(card.id, val)}
+                      onUpdateTotalPaid={(val) => updateTotalPaid('card', card.id, val)}
+                      onUpdateNotes={(val) => updateNotes('card', card.id, val)}
+                      onUpdateDueDate={(val) => updateDueDate('card', card.id, val)}
+                      onEdit={() => setEditingCard(card)}
+                    />
+                  ))}
+                </SortableContext>
+                <DragOverlay dropAnimation={{ duration: 220, easing: 'cubic-bezier(0.2, 0, 0, 1)' }}>
+                  {activeCard ? (
+                    <div className="w-[min(920px,92vw)] shadow-2xl rounded-xl scale-[1.015] ring-1 ring-indigo-200 pointer-events-none">
+                      <ItemCard
+                        item={activeCard}
+                        type="card"
+                        isOverlay
+                        onTogglePaid={() => {}}
+                        onDelete={() => {}}
+                        onUpdateBill={() => {}}
+                        onUpdateTotalPaid={() => {}}
+                        onUpdateNotes={() => {}}
+                        onUpdateDueDate={() => {}}
+                      />
+                    </div>
+                  ) : null}
+                </DragOverlay>
+              </DndContext>
+            )}
           </div>
         </section>
 
@@ -589,6 +698,14 @@ export default function Dashboard({ session }) {
           }}
         />
       )}
+      {editingCard && (
+        <AddModal
+          type="card"
+          editItem={editingCard}
+          onClose={() => setEditingCard(null)}
+          onAdd={handleSaveEditedCard}
+        />
+      )}
     </div>
   )
 }
@@ -600,85 +717,33 @@ function getOrdinal(n) {
   return n + (s[(v - 20) % 10] || s[v] || s[0])
 }
 
-function lastDayOfMonth(year, monthIndex) {
-  return new Date(year, monthIndex + 1, 0).getDate()
-}
-
-function monthKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-}
-
-function normalizeMonthKey(key) {
-  if (!key) return null
-  const [year, month] = String(key).split('-').map(Number)
-  if (!year || !month) return String(key)
-  return `${year}-${String(month).padStart(2, '0')}`
-}
-
-function cycleValue(key) {
-  if (!key) return 0
-  const [year, month] = String(key).split('-').map(Number)
-  return year * 12 + month
-}
-
-/** YYYY-MM of the next due date for a day-of-month (wraps into next month). */
-function getUpcomingDueCycleKey(dueDay, today = new Date()) {
-  const day = Number(dueDay)
-  if (!day) return null
-  const year = today.getFullYear()
-  const month = today.getMonth()
-  const dueThisMonth = Math.min(day, lastDayOfMonth(year, month))
-  if (today.getDate() <= dueThisMonth) return monthKey(today)
-  const next = new Date(year, month + 1, 1)
-  return monthKey(next)
-}
-
-function daysUntilDueDay(dueDay, today = new Date()) {
-  const day = Number(dueDay)
-  if (!day) return 1000
-  const year = today.getFullYear()
-  const month = today.getMonth()
-  const date = today.getDate()
-  const dueThisMonth = Math.min(day, lastDayOfMonth(year, month))
-  if (date <= dueThisMonth) return dueThisMonth - date
-  const next = new Date(year, month + 1, 1)
-  const dueNextMonth = Math.min(day, lastDayOfMonth(next.getFullYear(), next.getMonth()))
-  return (lastDayOfMonth(year, month) - date) + dueNextMonth
-}
-
-function dueSortKey(item, today = new Date()) {
-  if (!item?.due_date) return 1000
-  const upcoming = getUpcomingDueCycleKey(item.due_date, today)
-  const billedCycle = item.bill_cycle
-  const unpaid = !item.paid && ((item.bill_amount || item.amount || 0) > 0)
-  if (unpaid && billedCycle && upcoming && cycleValue(billedCycle) < cycleValue(upcoming)) {
-    return cycleValue(billedCycle) - cycleValue(upcoming)
+function SortableItemCard({ card, disabled, ...itemProps }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: card.id,
+    disabled,
+    animateLayoutChanges: ({ isSorting, wasDragging }) => isSorting || wasDragging,
+  })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: isDragging
+      ? undefined
+      : (transition || 'transform 220ms cubic-bezier(0.2, 0, 0, 1)'),
+    zIndex: isDragging ? 20 : undefined,
+    position: 'relative',
   }
-  return daysUntilDueDay(item.due_date, today)
+  return (
+    <div ref={setNodeRef} style={style} className={isDragging ? 'opacity-40' : 'transition-shadow duration-200'}>
+      <ItemCard
+        item={card}
+        type="card"
+        dragHandle={disabled ? null : { attributes, listeners }}
+        {...itemProps}
+      />
+    </div>
+  )
 }
 
-function compareUpcomingDue(a, b) {
-  return dueSortKey(a) - dueSortKey(b)
-}
-
-function nextCardCycleUpdates(card, today, monthChanged) {
-  if (!card.paid) return null
-
-  if (!card.due_date) {
-    return monthChanged ? { paid: false } : null
-  }
-
-  const upcoming = getUpcomingDueCycleKey(card.due_date, today)
-  const settled = card.settled_cycle || card.bill_cycle
-  if (settled) {
-    return upcoming && settled !== upcoming ? { paid: false } : null
-  }
-
-  const dueThisMonth = Math.min(Number(card.due_date), lastDayOfMonth(today.getFullYear(), today.getMonth()))
-  return today.getDate() > dueThisMonth ? { paid: false } : null
-}
-
-function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTotalPaid, onUpdateNotes, onUpdateDueDate }) {
+function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTotalPaid, onUpdateNotes, onUpdateDueDate, onEdit, dragHandle, isOverlay }) {
   const [showDetails, setShowDetails] = useState(false)
   const [isEditingTotalPaid, setIsEditingTotalPaid] = useState(false)
   const [isEditingNotes, setIsEditingNotes] = useState(false)
@@ -691,6 +756,13 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
   const [localTotalPaid, setLocalTotalPaid] = useState(item.total_paid || 0)
   const [localNotes, setLocalNotes] = useState(item.notes || '')
   const [localDueDate, setLocalDueDate] = useState(item.due_date || '')
+  const dueInfo = type === 'card' ? getCardDueInfo(item) : null
+  const statusMeta = dueInfo ? CARD_STATUS[dueInfo.status] : null
+  const feeInfo = type === 'card' ? getFeeWaiverInfo(item) : null
+  const upcomingDue = item.due_date ? getUpcomingDueDate(item.due_date) : null
+  const dueLabel = type === 'card'
+    ? dueInfo.caption
+    : (upcomingDue ? formatDueCaption(upcomingDue) : (item.due_date ? getOrdinal(item.due_date) : '—'))
 
   // Update local state if the parent amount changes
   useEffect(() => {
@@ -707,88 +779,115 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden transition-all">
-      <div className="py-3 px-6 flex items-center gap-12">
-        {/* Left: Nickname & Details Toggle (Fixed Width) */}
-        <div className="flex flex-col w-[240px] shrink-0">
-          <span className="text-sm font-medium text-gray-900 truncate">{item.nickname}</span>
+    <div className={`bg-white border rounded-xl overflow-hidden transition-all ${type === 'card' ? cardRowClass(dueInfo.status) : 'border-gray-200'}`}>
+      <div className="py-3 px-4 sm:px-6 flex flex-wrap lg:flex-nowrap items-center gap-3 lg:gap-6">
+        {dragHandle && (
           <button
-            onClick={() => setShowDetails(!showDetails)}
-            className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 mt-0.5 text-left transition-colors tracking-widest uppercase"
+            type="button"
+            aria-label="Drag to reorder"
+            className="shrink-0 cursor-grab active:cursor-grabbing touch-none p-1.5 rounded-lg text-slate-300 hover:text-slate-500 hover:bg-slate-50"
+            {...dragHandle.attributes}
+            {...dragHandle.listeners}
           >
-            <span>{showDetails ? '▴ Hide Details' : '▾ Show Details'}</span>
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M9 5h2v2H9V5zm4 0h2v2h-2V5zM9 11h2v2H9v-2zm4 0h2v2h-2v-2zM9 17h2v2H9v-2zm4 0h2v2h-2v-2z" />
+            </svg>
           </button>
+        )}
+
+        <div className="flex flex-col w-[200px] min-w-[160px] shrink-0">
+          <span className="text-sm font-medium text-gray-900 truncate">{item.nickname}</span>
+          {type === 'card' && statusMeta && (
+            <span className={`mt-1 w-fit text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${statusMeta.className}`}>
+              {statusMeta.label}
+            </span>
+          )}
+          {!isOverlay && (
+            <button
+              onClick={() => setShowDetails(!showDetails)}
+              className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 mt-0.5 text-left transition-colors tracking-widest uppercase"
+            >
+              <span>{showDetails ? '▴ Hide Details' : '▾ Show Details'}</span>
+            </button>
+          )}
         </div>
 
-        {/* Middle: Aligned Info Columns (Fixed Widths for Perfect Alignment) */}
-        <div className="grid grid-cols-[120px_200px_100px] gap-4 text-sm text-gray-500 shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[35px]">Due</span>
-            {isEditingDueDate ? (
-              <>
-                <input
-                  type="number"
-                  min="1" max="31"
-                  value={localDueDate}
-                  onChange={(e) => setLocalDueDate(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { onUpdateDueDate(localDueDate); setIsEditingDueDate(false) }
-                    if (e.key === 'Escape') setIsEditingDueDate(false)
-                  }}
-                  autoFocus
-                  className="w-12 px-1.5 py-0.5 text-xs font-mono border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-center"
-                />
-                <button
-                  onClick={() => { onUpdateDueDate(localDueDate); setIsEditingDueDate(false) }}
-                  className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
-                >
-                  ✓
-                </button>
-                <button
-                  onClick={() => setIsEditingDueDate(false)}
-                  className="text-[9px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest"
-                >
-                  ✕
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="text-gray-700 font-medium">{item.due_date ? getOrdinal(item.due_date) : '—'}</span>
+        <div className="flex items-center gap-2 min-w-[200px] flex-1 lg:flex-none">
+          <span className="text-xs text-gray-400 uppercase tracking-wide shrink-0">Due</span>
+          {isEditingDueDate ? (
+            <>
+              <input
+                type="number"
+                min="1" max="31"
+                value={localDueDate}
+                onChange={(e) => setLocalDueDate(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { onUpdateDueDate(localDueDate); setIsEditingDueDate(false) }
+                  if (e.key === 'Escape') setIsEditingDueDate(false)
+                }}
+                autoFocus
+                className="w-12 px-1.5 py-0.5 text-xs font-mono border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-center"
+              />
+              <button
+                onClick={() => { onUpdateDueDate(localDueDate); setIsEditingDueDate(false) }}
+                className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
+              >
+                ✓
+              </button>
+              <button
+                onClick={() => setIsEditingDueDate(false)}
+                className="text-[9px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest"
+              >
+                ✕
+              </button>
+            </>
+          ) : (
+            <>
+              <span className={`text-sm font-medium ${dueInfo?.status === 'overdue' ? 'text-rose-700' : 'text-gray-800'}`}>
+                {dueLabel}
+              </span>
+              {!isOverlay && (
                 <button
                   onClick={() => setIsEditingDueDate(true)}
-                  title="Edit due date"
+                  title="Edit due day"
                   className="text-slate-300 hover:text-indigo-500 transition-colors ml-0.5"
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536M9 11l6.364-6.364a2 2 0 112.828 2.828L11.828 13.828A2 2 0 0110 14.4V16h1.6a2 2 0 001.414-.586l.172-.172" />
                   </svg>
                 </button>
-              </>
-            )}
-          </div>
+              )}
+            </>
+          )}
+        </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[75px]">Amount</span>
-            {isPaid ? (
-              <span className="text-emerald-600 font-bold text-[10px] bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100 tracking-widest uppercase">Paid</span>
-            ) : (
-              <span className="font-semibold text-gray-900">
-                <span className="text-gray-400 mr-0.5 font-sans font-normal">₹</span>{(amount || 0).toLocaleString('en-IN')}
+        <div className="flex items-center gap-2 min-w-[120px]">
+          <span className="text-xs text-gray-400 uppercase tracking-wide">Amount</span>
+          {isPaid ? (
+            <span className="text-emerald-600 font-bold text-[10px] bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100 tracking-widest uppercase">Paid</span>
+          ) : (
+            <span className="font-semibold text-gray-900">
+              <span className="text-gray-400 mr-0.5 font-sans font-normal">₹</span>{(amount || 0).toLocaleString('en-IN')}
+            </span>
+          )}
+        </div>
+
+        {feeInfo && (
+          <div className="hidden xl:flex flex-col min-w-[150px] shrink-0">
+            {feeInfo.feeHitsThisMonth && (
+              <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">
+                Fee {formatINR(feeInfo.feeAmount)} this month
+              </span>
+            )}
+            {feeInfo.waiver > 0 && (
+              <span className={`text-[10px] ${feeInfo.met ? 'text-emerald-600 font-semibold' : 'text-slate-500'}`}>
+                {feeInfo.met ? 'Waiver target met' : `${formatINR(feeInfo.remaining)} left to waive`}
               </span>
             )}
           </div>
+        )}
 
-          <div className="flex items-center gap-2">
-            {type === 'emi' && (
-              <>
-                <span className="text-[10px] text-slate-400 uppercase tracking-widest min-w-[40px]">Term</span>
-                <span className="text-indigo-600 font-semibold text-lg">{item.current_month}/{item.total_months}</span>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Right: Actions (Pushed to end) */}
+        {!isOverlay && (
         <div className="flex-1 flex items-center gap-4 justify-end">
           {type === 'card' && !isPaid && (
             <div className="flex items-center gap-2">
@@ -811,7 +910,6 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
             </div>
           )}
 
-          {/* Only show Mark Paid for Credit Cards */}
           {type === 'card' && (
             <button
               onClick={onTogglePaid}
@@ -834,10 +932,23 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
             </svg>
           </button>
         </div>
+        )}
       </div>
 
       {showDetails && (
-        <div className="bg-slate-50/50 border-t border-slate-100 px-8 py-4 grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-3">
+        <div className="bg-slate-50/50 border-t border-slate-100 px-8 py-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Details</p>
+            {type === 'card' && onEdit && (
+              <button
+                onClick={onEdit}
+                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 uppercase tracking-widest"
+              >
+                Edit card
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-3">
           {type === 'card' && (
             <div className="space-y-0.5">
               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Full Card Name</p>
@@ -885,14 +996,29 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
                 <p className="text-sm font-semibold text-slate-700">
                   {item.annual_fee_type === 'LTF'
                     ? <span className="text-emerald-600">LTF</span>
-                    : `${formatINR(item.annual_fee)} in ${item.fee_month}`
+                    : `${formatINR(item.annual_fee)} in ${item.fee_month || '—'}`
                   }
                 </p>
+                {feeInfo?.feeHitsThisMonth && (
+                  <p className="text-[11px] font-medium text-amber-700">Fee hits this statement cycle</p>
+                )}
               </div>
-              {item.annual_fee_type === 'paid' && (
-                <div className="space-y-0.5">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Waiver Target</p>
-                  <p className="text-sm font-semibold text-slate-700">{formatINR(item.waiver_amount)}</p>
+              {feeInfo && feeInfo.waiver > 0 && (
+                <div className="space-y-1 col-span-2">
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Waiver progress</p>
+                  <p className="text-sm font-semibold text-slate-700">
+                    {formatINR(feeInfo.spent)} / {formatINR(feeInfo.waiver)}
+                    {feeInfo.met
+                      ? <span className="ml-2 text-emerald-600 text-xs">Target met</span>
+                      : <span className="ml-2 text-slate-500 text-xs">{formatINR(feeInfo.remaining)} left</span>}
+                  </p>
+                  <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${feeInfo.met ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+                      style={{ width: `${feeInfo.pct}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400">Uses recorded payments (edit Total Paid if this should track spend instead).</p>
                 </div>
               )}
             </>
@@ -935,27 +1061,27 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
               )
             )}
           </div>
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-function AddModal({ type, onClose, onAdd }) {
-  const [nickname, setNickname] = useState('')
-  const [cardName, setCardName] = useState('')
-  const [amount, setAmount] = useState('')
-  const [dueDate, setDueDate] = useState('')
-  const [feeType, setFeeType] = useState('LTF')
-  const [annualFee, setAnnualFee] = useState('')
-  const [feeMonth, setFeeMonth] = useState('')
-  const [waiverAmount, setWaiverAmount] = useState('')
-  const [totalMonths, setTotalMonths] = useState('')
-  const [currentMonth, setCurrentMonth] = useState('0')
-  const [notes, setNotes] = useState('')
+function AddModal({ type, editItem, onClose, onAdd }) {
+  const isEdit = Boolean(editItem)
+  const [nickname, setNickname] = useState(editItem?.nickname || '')
+  const [cardName, setCardName] = useState(editItem?.card_name || '')
+  const [amount, setAmount] = useState(editItem?.amount ?? '')
+  const [dueDate, setDueDate] = useState(editItem?.due_date || '')
+  const [feeType, setFeeType] = useState(editItem?.annual_fee_type || 'LTF')
+  const [annualFee, setAnnualFee] = useState(editItem?.annual_fee ?? '')
+  const [feeMonth, setFeeMonth] = useState(editItem?.fee_month || '')
+  const [waiverAmount, setWaiverAmount] = useState(editItem?.waiver_amount ?? '')
+  const [notes, setNotes] = useState(editItem?.notes || '')
 
   const titles = {
-    card: 'Add Credit Card',
+    card: isEdit ? 'Edit Credit Card' : 'Add Credit Card',
     subscription: 'Add Subscription',
     expense: 'Add Expense'
   }
@@ -966,25 +1092,23 @@ function AddModal({ type, onClose, onAdd }) {
 
     const data = {
       nickname,
-      due_date: dueDate,
-      paid: false,
+      due_date: dueDate === '' || dueDate == null ? null : parseInt(dueDate, 10),
       notes: notes,
+    }
+
+    if (!isEdit) {
+      data.paid = false
     }
 
     if (type === 'card') {
       data.card_name = cardName
-      data.bill_amount = 0
       data.annual_fee_type = feeType
       data.annual_fee = feeType === 'paid' ? parseFloat(annualFee) : null
       data.fee_month = feeType === 'paid' ? feeMonth : null
       data.waiver_amount = feeType === 'paid' ? parseFloat(waiverAmount) : null
+      if (!isEdit) data.bill_amount = 0
     } else {
       data.amount = parseFloat(amount) || 0
-    }
-
-    if (type === 'emi') {
-      data.total_months = parseInt(totalMonths) || 1
-      data.current_month = parseInt(currentMonth) || 0
     }
 
     onAdd(data)
@@ -1082,7 +1206,7 @@ function AddModal({ type, onClose, onAdd }) {
                       className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
                     >
                       <option value="">Select Month</option>
-                      {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => (
+                      {MONTH_NAMES.map(m => (
                         <option key={m} value={m}>{m}</option>
                       ))}
                     </select>
@@ -1117,7 +1241,7 @@ function AddModal({ type, onClose, onAdd }) {
             type="submit"
             className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 transition-colors mt-6 text-xs uppercase tracking-widest"
           >
-            Add {type}
+            {isEdit ? 'Save changes' : `Add ${type}`}
           </button>
         </form>
       </div>
