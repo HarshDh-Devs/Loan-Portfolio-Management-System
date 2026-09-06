@@ -43,6 +43,19 @@ export function formatDate(isoDate) {
   });
 }
 
+export function formatDateTime(isoDate) {
+  if (!isoDate) return "—";
+  const d = new Date(isoDate);
+  if (isNaN(d)) return "—";
+  return d.toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 /**
  * Return relative label like "in 3 days", "today", "overdue 2 days".
  */
