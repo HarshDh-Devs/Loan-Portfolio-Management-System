@@ -42,6 +42,16 @@ import {
 } from '../utils/cardDue'
 import Navbar from '../components/Navbar'
 
+const DASHBOARD_THEME_KEY = 'lpms_dashboard_dark'
+
+function readDashboardDark() {
+  try {
+    return localStorage.getItem(DASHBOARD_THEME_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 export default function Dashboard({ session }) {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
@@ -61,6 +71,19 @@ export default function Dashboard({ session }) {
   const [editingCard, setEditingCard] = useState(null)
 
   const [showModal, setShowModal] = useState(null) // 'card', 'subscription', 'emi', 'expense'
+  const [darkMode, setDarkMode] = useState(readDashboardDark)
+
+  const toggleDarkMode = () => {
+    setDarkMode(prev => {
+      const next = !prev
+      try {
+        localStorage.setItem(DASHBOARD_THEME_KEY, next ? '1' : '0')
+      } catch {
+        /* ignore quota / private mode */
+      }
+      return next
+    })
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -293,8 +316,8 @@ export default function Dashboard({ session }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <Navbar session={session} activePage="Dashboard" />
+      <div className={`dashboard-shell min-h-screen ${darkMode ? 'dashboard-shell--dark' : 'bg-gray-50'}`}>
+        <Navbar session={session} activePage="Dashboard" darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />
         <div className="flex items-center justify-center py-20">
           <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
         </div>
@@ -303,8 +326,8 @@ export default function Dashboard({ session }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
-      <Navbar session={session} activePage="Dashboard" />
+    <div className={`dashboard-shell min-h-screen pb-20 ${darkMode ? 'dashboard-shell--dark' : 'bg-gray-50'}`}>
+      <Navbar session={session} activePage="Dashboard" darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />
 
       {/* Summary Bar */}
       <div className="max-w-[1400px] mx-auto px-6 py-8">
@@ -461,7 +484,7 @@ export default function Dashboard({ session }) {
                 </SortableContext>
                 <DragOverlay dropAnimation={{ duration: 220, easing: 'cubic-bezier(0.2, 0, 0, 1)' }}>
                   {activeCard ? (
-                    <div className="w-[min(920px,92vw)] shadow-2xl rounded-xl scale-[1.015] ring-1 ring-indigo-200 pointer-events-none">
+                    <div className={`w-[min(920px,92vw)] shadow-2xl rounded-xl scale-[1.015] ring-1 ring-indigo-200 pointer-events-none ${darkMode ? 'dashboard-shell dashboard-shell--dark' : ''}`}>
                       <ItemCard
                         item={activeCard}
                         type="card"
