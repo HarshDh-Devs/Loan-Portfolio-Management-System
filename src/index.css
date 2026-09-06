@@ -1,3 +1,187 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.dashboard-shell--dark {
+  color-scheme: dark;
+  background-color: #3c4148;
+  color: #e6e8eb;
+}
+
+.dashboard-shell--dark .bg-gray-50,
+.dashboard-shell--dark.min-h-screen {
+  background-color: #3c4148 !important;
+}
+
+.dashboard-shell--dark .bg-white {
+  background-color: #4a5058 !important;
+}
+
+.dashboard-shell--dark .bg-gray-50 {
+  background-color: #3c4148 !important;
+}
+
+.dashboard-shell--dark .bg-slate-50,
+.dashboard-shell--dark .bg-slate-50\/50,
+.dashboard-shell--dark .bg-slate-50\/30 {
+  background-color: #434951 !important;
+}
+
+.dashboard-shell--dark .bg-slate-200 {
+  background-color: #5c646e !important;
+}
+
+.dashboard-shell--dark .text-gray-900,
+.dashboard-shell--dark .text-gray-800,
+.dashboard-shell--dark .text-slate-700 {
+  color: #eef0f2 !important;
+}
+
+.dashboard-shell--dark .text-gray-700,
+.dashboard-shell--dark .text-gray-600,
+.dashboard-shell--dark .text-slate-600 {
+  color: #cfd4da !important;
+}
+
+.dashboard-shell--dark .text-gray-500,
+.dashboard-shell--dark .text-slate-500 {
+  color: #b3bac2 !important;
+}
+
+.dashboard-shell--dark .text-gray-400,
+.dashboard-shell--dark .text-slate-400,
+.dashboard-shell--dark .text-slate-300 {
+  color: #9aa3ad !important;
+}
+
+.dashboard-shell--dark .border-gray-200,
+.dashboard-shell--dark .border-gray-100,
+.dashboard-shell--dark .border-slate-200,
+.dashboard-shell--dark .border-slate-100,
+.dashboard-shell--dark .border-gray-50 {
+  border-color: #646c76 !important;
+}
+
+.dashboard-shell--dark .hover\:bg-gray-50:hover,
+.dashboard-shell--dark .hover\:bg-gray-100:hover,
+.dashboard-shell--dark .hover\:bg-slate-50:hover {
+  background-color: #545b64 !important;
+}
+
+.dashboard-shell--dark .hover\:text-gray-900:hover,
+.dashboard-shell--dark .hover\:text-gray-600:hover,
+.dashboard-shell--dark .hover\:text-slate-600:hover,
+.dashboard-shell--dark .hover\:text-slate-500:hover {
+  color: #f3f4f6 !important;
+}
+
+.dashboard-shell--dark .text-indigo-600,
+.dashboard-shell--dark .text-indigo-500 {
+  color: #a8b8ff !important;
+}
+
+.dashboard-shell--dark .hover\:text-indigo-700:hover,
+.dashboard-shell--dark .hover\:text-indigo-600:hover,
+.dashboard-shell--dark .hover\:text-indigo-500:hover {
+  color: #c5d0ff !important;
+}
+
+.dashboard-shell--dark .text-rose-700,
+.dashboard-shell--dark .text-rose-600,
+.dashboard-shell--dark .text-rose-500 {
+  color: #f0b4b4 !important;
+}
+
+.dashboard-shell--dark .bg-rose-50\/30 {
+  background-color: rgba(120, 72, 72, 0.35) !important;
+}
+
+.dashboard-shell--dark .bg-amber-50\/40 {
+  background-color: rgba(120, 96, 48, 0.32) !important;
+}
+
+.dashboard-shell--dark .bg-rose-50 {
+  background-color: rgba(140, 70, 70, 0.38) !important;
+}
+
+.dashboard-shell--dark .bg-orange-50 {
+  background-color: rgba(140, 90, 50, 0.38) !important;
+}
+
+.dashboard-shell--dark .bg-indigo-50 {
+  background-color: rgba(80, 90, 140, 0.38) !important;
+}
+
+.dashboard-shell--dark .text-emerald-700,
+.dashboard-shell--dark .text-emerald-600,
+.dashboard-shell--dark .text-emerald-500 {
+  color: #8ed4ab !important;
+}
+
+.dashboard-shell--dark .text-orange-700 {
+  color: #efc090 !important;
+}
+
+.dashboard-shell--dark .text-amber-800 {
+  color: #e8c888 !important;
+}
+
+.dashboard-shell--dark .hover\:bg-rose-50:hover {
+  background-color: rgba(140, 70, 70, 0.45) !important;
+}
+
+.dashboard-shell--dark .bg-amber-50 {
+  background-color: #5a5040 !important;
+}
+
+.dashboard-shell--dark .border-amber-200 {
+  border-color: #7d7058 !important;
+}
+
+.dashboard-shell--dark .text-amber-700 {
+  color: #ead7a8 !important;
+}
+
+.dashboard-shell--dark .hover\:bg-amber-100:hover {
+  background-color: #6a5e48 !important;
+}
+
+.dashboard-shell--dark .bg-green-50 {
+  background-color: rgba(52, 92, 70, 0.4) !important;
+}
+
+.dashboard-shell--dark .text-green-700 {
+  color: #8ee0b0 !important;
+}
+
+.dashboard-shell--dark input,
+.dashboard-shell--dark textarea,
+.dashboard-shell--dark select {
+  background-color: #40464e !important;
+  color: #eef0f2 !important;
+  border-color: #6a727c !important;
+}
+
+.dashboard-shell--dark input::placeholder,
+.dashboard-shell--dark textarea::placeholder {
+  color: #9aa3ad !important;
+}
+
+.dashboard-shell--dark .bg-gray-900 {
+  background-color: #2f343a !important;
+}
+
+.dashboard-shell--dark .hover\:bg-gray-800:hover {
+  background-color: #262b31 !important;
+}
+
+.dashboard-shell--dark .dashboard-theme-toggle {
+  border-color: #6a727c;
+  color: #d5dae0;
+  background-color: #454c55;
+}
+
+.dashboard-shell--dark .dashboard-theme-toggle:hover {
+  background-color: #545b64;
+  color: #f3f4f6;
+}
