@@ -24,7 +24,7 @@ import {
   getSubscriptions, addSubscription, updateSubscription, deleteSubscription,
   getExpenses, addExpense, updateExpense, deleteExpense
 } from '../data/financeStorage'
-import { formatINR } from '../utils/format'
+import { formatINR, formatDateTime } from '../utils/format'
 import {
   CARD_STATUS,
   MONTH_NAMES,
@@ -227,6 +227,8 @@ export default function Dashboard({ session }) {
     if (isPaid) {
       updates.total_paid = (item.total_paid || 0) + (type === 'card' ? (item.bill_amount || 0) : (item.amount || 0))
       if (type === 'card') {
+        updates.last_paid_amount = item.bill_amount || 0
+        updates.last_paid_at = new Date().toISOString()
         updates.bill_amount = 0
         updates.settled_cycle = item.bill_cycle || getUpcomingDueCycleKey(item.due_date)
       } else {
@@ -895,6 +897,16 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
           )}
         </div>
 
+        {type === 'card' && isPaid && item.last_paid_at && (
+          <div className="flex flex-col min-w-[160px] shrink-0">
+            <span className="text-xs text-gray-400 uppercase tracking-wide">Last paid</span>
+            <span className="text-sm font-semibold text-gray-900">
+              {formatINR(item.last_paid_amount || 0)}
+            </span>
+            <span className="text-[11px] text-slate-500">{formatDateTime(item.last_paid_at)}</span>
+          </div>
+        )}
+
         {feeInfo && (
           <div className="hidden xl:flex flex-col min-w-[150px] shrink-0">
             {feeInfo.feeHitsThisMonth && (
@@ -976,6 +988,14 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
             <div className="space-y-0.5">
               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Full Card Name</p>
               <p className="text-sm font-semibold text-slate-700">{item.card_name || '—'}</p>
+            </div>
+          )}
+
+          {type === 'card' && item.last_paid_at && (
+            <div className="space-y-0.5">
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Last paid</p>
+              <p className="text-sm font-semibold text-slate-700">{formatINR(item.last_paid_amount || 0)}</p>
+              <p className="text-[11px] text-slate-500">{formatDateTime(item.last_paid_at)}</p>
             </div>
           )}
 
