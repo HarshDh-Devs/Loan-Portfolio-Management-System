@@ -40,47 +40,48 @@ export default function Dashboard({ session }) {
           getLoans(session)
         ])
 
-        // Automatic Monthly Reset Logic
         const now = new Date()
-        const currentMonthKey = `${now.getFullYear()}-${now.getMonth() + 1}`
-        const lastReset = s.last_reset_month
+        const currentMonthKey = monthKey(now)
+        const lastReset = normalizeMonthKey(s.last_reset_month)
+        const monthChanged = Boolean(lastReset && lastReset !== currentMonthKey)
 
-        if (lastReset && lastReset !== currentMonthKey) {
-          // It's a new month! Update total_paid for automatic items
-          const updatedSubs = sub.map(item => ({
+        let cardsData = c
+        let subsData = sub
+        let expsData = exp
+        const persist = []
+
+        // Calendar-month rollover is only for subscriptions/expenses.
+        // Credit card bills follow each card's due day, not the 1st.
+        if (monthChanged) {
+          subsData = sub.map(item => ({
             ...item,
             total_paid: (item.total_paid || 0) + (item.amount || 0)
           }))
-          const updatedExps = exp.map(item => ({
+          expsData = exp.map(item => ({
             ...item,
             total_paid: (item.total_paid || 0) + (item.amount || 0)
           }))
-          const updatedCards = c.map(item => ({
-            ...item,
-            paid: false,
-            bill_amount: 0
-          }))
-
-          // Save updates to DB
-          await Promise.all([
-            ...updatedSubs.map(item => updateSubscription(session, item.id, { total_paid: item.total_paid })),
-            ...updatedExps.map(item => updateExpense(session, item.id, { total_paid: item.total_paid })),
-            ...updatedCards.map(item => updateCard(session, item.id, { paid: false, bill_amount: 0 })),
+          persist.push(
+            ...subsData.map(item => updateSubscription(session, item.id, { total_paid: item.total_paid })),
+            ...expsData.map(item => updateExpense(session, item.id, { total_paid: item.total_paid })),
             saveSettings(session, { ...s, last_reset_month: currentMonthKey })
-          ])
-
-          setSubscriptions(updatedSubs)
-          setExpenses(updatedExps)
-          setCards(updatedCards)
-        } else {
-          if (!lastReset) {
-            // Initialize last_reset_month for new users
-            await saveSettings(session, { ...s, last_reset_month: currentMonthKey })
-          }
-          setCards(c)
-          setSubscriptions(sub)
-          setExpenses(exp)
+          )
+        } else if (!lastReset) {
+          persist.push(saveSettings(session, { ...s, last_reset_month: currentMonthKey }))
         }
+
+        cardsData = cardsData.map(card => {
+          const updates = nextCardCycleUpdates(card, now, monthChanged)
+          if (!updates) return card
+          persist.push(updateCard(session, card.id, updates))
+          return { ...card, ...updates }
+        })
+
+        if (persist.length) await Promise.all(persist)
+
+        setCards(cardsData)
+        setSubscriptions(subsData)
+        setExpenses(expsData)
 
         setBalance(s.available_balance || 0)
         setLoans(l)
@@ -122,12 +123,10 @@ export default function Dashboard({ session }) {
 
     if (isPaid) {
       updates.total_paid = (item.total_paid || 0) + (type === 'card' ? (item.bill_amount || 0) : (item.amount || 0))
-      // Reset amount to 0 when paid
       if (type === 'card') {
         updates.bill_amount = 0
+        updates.settled_cycle = item.bill_cycle || getUpcomingDueCycleKey(item.due_date)
       } else {
-        // For other expenses, we might not want to reset the base amount, 
-        // but the user asked to reset amount to 0.
         updates.amount = 0
       }
     }
@@ -160,8 +159,11 @@ export default function Dashboard({ session }) {
 
   const updateBillAmount = async (id, val) => {
     const amount = parseFloat(val) || 0
-    await updateCard(session, id, { bill_amount: amount })
-    setCards(prev => prev.map(c => c.id === id ? { ...c, bill_amount: amount } : c))
+    const card = cards.find(c => c.id === id)
+    const updates = { bill_amount: amount }
+    if (card?.due_date) updates.bill_cycle = getUpcomingDueCycleKey(card.due_date)
+    await updateCard(session, id, updates)
+    setCards(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
   }
 
   const updateTotalPaid = async (type, id, val) => {
@@ -183,6 +185,7 @@ export default function Dashboard({ session }) {
     const day = parseInt(val) || null
     const updates = { due_date: day }
     if (type === 'card') {
+      if (day) updates.bill_cycle = getUpcomingDueCycleKey(day)
       await updateCard(session, id, updates)
       setCards(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
     } else if (type === 'subscription') {
@@ -335,7 +338,7 @@ export default function Dashboard({ session }) {
                   className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
                 >
                   <option value="none">Default</option>
-                  <option value="due">Due Day (1-31)</option>
+                  <option value="due">Upcoming due</option>
                   <option value="amount_high">Bill Amount (High-Low)</option>
                   <option value="amount_low">Bill Amount (Low-High)</option>
                 </select>
@@ -348,7 +351,7 @@ export default function Dashboard({ session }) {
               <p className="text-base text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No credit cards added</p>
             ) : [...cards]
               .sort((a, b) => {
-                if (cardSort === 'due') return (a.due_date || 99) - (b.due_date || 99)
+                if (cardSort === 'due') return compareUpcomingDue(a, b)
                 if (cardSort === 'amount_high') return (b.bill_amount || 0) - (a.bill_amount || 0)
                 if (cardSort === 'amount_low') return (a.bill_amount || 0) - (b.bill_amount || 0)
                 return 0
@@ -382,7 +385,7 @@ export default function Dashboard({ session }) {
                   className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
                 >
                   <option value="none">Default</option>
-                  <option value="due">Due Day (1-31)</option>
+                  <option value="due">Upcoming due</option>
                   <option value="amount_high">Amount (High-Low)</option>
                   <option value="amount_low">Amount (Low-High)</option>
                   <option value="paid_most">Most Paid</option>
@@ -402,9 +405,9 @@ export default function Dashboard({ session }) {
               .map(l => ({ ...l, state: getCurrentLoanState(l) }))
               .sort((a, b) => {
                 if (loanSort === 'due') {
-                  const dayA = a.state.nextEmiDate ? new Date(a.state.nextEmiDate).getDate() : 99
-                  const dayB = b.state.nextEmiDate ? new Date(b.state.nextEmiDate).getDate() : 99
-                  return dayA - dayB
+                  const timeA = a.state.nextEmiDate ? new Date(a.state.nextEmiDate).getTime() : Infinity
+                  const timeB = b.state.nextEmiDate ? new Date(b.state.nextEmiDate).getTime() : Infinity
+                  return timeA - timeB
                 }
                 if (loanSort === 'amount_high') {
                   return (b.emiAmount || 0) - (a.emiAmount || 0)
@@ -485,7 +488,7 @@ export default function Dashboard({ session }) {
                   className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
                 >
                   <option value="none">Default</option>
-                  <option value="due">Due Day (1-31)</option>
+                  <option value="due">Upcoming due</option>
                   <option value="amount_high">Amount (High-Low)</option>
                   <option value="amount_low">Amount (Low-High)</option>
                 </select>
@@ -498,7 +501,7 @@ export default function Dashboard({ session }) {
               <p className="text-base text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No subscriptions added</p>
             ) : [...subscriptions]
               .sort((a, b) => {
-                if (subscriptionSort === 'due') return (a.due_date || 99) - (b.due_date || 99)
+                if (subscriptionSort === 'due') return compareUpcomingDue(a, b)
                 if (subscriptionSort === 'amount_high') return (b.amount || 0) - (a.amount || 0)
                 if (subscriptionSort === 'amount_low') return (a.amount || 0) - (b.amount || 0)
                 return 0
@@ -531,7 +534,7 @@ export default function Dashboard({ session }) {
                   className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
                 >
                   <option value="none">Default</option>
-                  <option value="due">Due Day (1-31)</option>
+                  <option value="due">Upcoming due</option>
                   <option value="amount_high">Amount (High-Low)</option>
                   <option value="amount_low">Amount (Low-High)</option>
                 </select>
@@ -544,7 +547,7 @@ export default function Dashboard({ session }) {
               <p className="text-base text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No expenses added</p>
             ) : [...expenses]
               .sort((a, b) => {
-                if (expenseSort === 'due') return (a.due_date || 99) - (b.due_date || 99)
+                if (expenseSort === 'due') return compareUpcomingDue(a, b)
                 if (expenseSort === 'amount_high') return (b.amount || 0) - (a.amount || 0)
                 if (expenseSort === 'amount_low') return (a.amount || 0) - (b.amount || 0)
                 return 0
@@ -595,6 +598,84 @@ function getOrdinal(n) {
   const s = ["th", "st", "nd", "rd"]
   const v = n % 100
   return n + (s[(v - 20) % 10] || s[v] || s[0])
+}
+
+function lastDayOfMonth(year, monthIndex) {
+  return new Date(year, monthIndex + 1, 0).getDate()
+}
+
+function monthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+function normalizeMonthKey(key) {
+  if (!key) return null
+  const [year, month] = String(key).split('-').map(Number)
+  if (!year || !month) return String(key)
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+function cycleValue(key) {
+  if (!key) return 0
+  const [year, month] = String(key).split('-').map(Number)
+  return year * 12 + month
+}
+
+/** YYYY-MM of the next due date for a day-of-month (wraps into next month). */
+function getUpcomingDueCycleKey(dueDay, today = new Date()) {
+  const day = Number(dueDay)
+  if (!day) return null
+  const year = today.getFullYear()
+  const month = today.getMonth()
+  const dueThisMonth = Math.min(day, lastDayOfMonth(year, month))
+  if (today.getDate() <= dueThisMonth) return monthKey(today)
+  const next = new Date(year, month + 1, 1)
+  return monthKey(next)
+}
+
+function daysUntilDueDay(dueDay, today = new Date()) {
+  const day = Number(dueDay)
+  if (!day) return 1000
+  const year = today.getFullYear()
+  const month = today.getMonth()
+  const date = today.getDate()
+  const dueThisMonth = Math.min(day, lastDayOfMonth(year, month))
+  if (date <= dueThisMonth) return dueThisMonth - date
+  const next = new Date(year, month + 1, 1)
+  const dueNextMonth = Math.min(day, lastDayOfMonth(next.getFullYear(), next.getMonth()))
+  return (lastDayOfMonth(year, month) - date) + dueNextMonth
+}
+
+function dueSortKey(item, today = new Date()) {
+  if (!item?.due_date) return 1000
+  const upcoming = getUpcomingDueCycleKey(item.due_date, today)
+  const billedCycle = item.bill_cycle
+  const unpaid = !item.paid && ((item.bill_amount || item.amount || 0) > 0)
+  if (unpaid && billedCycle && upcoming && cycleValue(billedCycle) < cycleValue(upcoming)) {
+    return cycleValue(billedCycle) - cycleValue(upcoming)
+  }
+  return daysUntilDueDay(item.due_date, today)
+}
+
+function compareUpcomingDue(a, b) {
+  return dueSortKey(a) - dueSortKey(b)
+}
+
+function nextCardCycleUpdates(card, today, monthChanged) {
+  if (!card.paid) return null
+
+  if (!card.due_date) {
+    return monthChanged ? { paid: false } : null
+  }
+
+  const upcoming = getUpcomingDueCycleKey(card.due_date, today)
+  const settled = card.settled_cycle || card.bill_cycle
+  if (settled) {
+    return upcoming && settled !== upcoming ? { paid: false } : null
+  }
+
+  const dueThisMonth = Math.min(Number(card.due_date), lastDayOfMonth(today.getFullYear(), today.getMonth()))
+  return today.getDate() > dueThisMonth ? { paid: false } : null
 }
 
 function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTotalPaid, onUpdateNotes, onUpdateDueDate }) {
