@@ -88,6 +88,13 @@ export async function saveFinanceData(session, data) {
   else saveLocalData(data)
 }
 
+export async function patchFinanceData(session, mutator) {
+  const d = await getFinanceData(session)
+  mutator(d)
+  await saveFinanceData(session, d)
+  return d
+}
+
 // ── Cards ────────────────────────────────────────────────────────────────────
 
 export async function getCards(session) {
@@ -97,7 +104,8 @@ export async function getCards(session) {
 
 export async function addCard(session, card) {
   const d = await getFinanceData(session)
-  const newCard = { ...card, id: crypto.randomUUID(), total_paid: 0 }
+  const maxOrder = (d.cards || []).reduce((m, c) => Math.max(m, c.sort_order ?? -1), -1)
+  const newCard = { ...card, id: crypto.randomUUID(), total_paid: 0, sort_order: maxOrder + 1 }
   d.cards = [...(d.cards || []), newCard]
   await saveFinanceData(session, d)
   return newCard
@@ -112,6 +120,15 @@ export async function updateCard(session, id, updates) {
 export async function deleteCard(session, id) {
   const d = await getFinanceData(session)
   d.cards = (d.cards || []).filter(c => c.id !== id)
+  await saveFinanceData(session, d)
+}
+
+export async function reorderCards(session, orderedIds) {
+  const d = await getFinanceData(session)
+  const orderMap = Object.fromEntries(orderedIds.map((id, i) => [id, i]))
+  d.cards = (d.cards || []).map(c => (
+    orderMap[c.id] == null ? c : { ...c, sort_order: orderMap[c.id] }
+  ))
   await saveFinanceData(session, d)
 }
 
