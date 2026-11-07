@@ -129,6 +129,25 @@ export default function Dashboard({ session }) {
 
         // Auto-reset disabled — user manually controls paid/unpaid status
 
+        // Backfill payment_history from last_paid for existing cards if not already recorded
+        cardsData = cardsData.map(card => {
+          if (card.last_paid_amount > 0 && card.last_paid_at) {
+            const hist = card.payment_history || []
+            const exists = hist.some(p => p.paid_at === card.last_paid_at)
+            if (!exists) {
+              cardsChanged = true
+              return {
+                ...card,
+                payment_history: [
+                  ...hist,
+                  { amount: Number(card.last_paid_amount), paid_at: card.last_paid_at }
+                ]
+              }
+            }
+          }
+          return card
+        })
+
         const ordered = ensureCardSortOrder(cardsData)
         cardsData = ordered.cards
         if (ordered.changed) cardsChanged = true
@@ -1075,6 +1094,15 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
     ? dueInfo.caption
     : (upcomingDue ? formatDueCaption(upcomingDue) : (item.due_date ? getOrdinal(item.due_date) : '—'))
 
+  // Seamlessly incorporate existing last_paid into payment history if not yet recorded
+  const effectiveHistory = useMemo(() => {
+    let hist = item.payment_history || []
+    if (item.last_paid_amount > 0 && item.last_paid_at && !hist.some(p => p.paid_at === item.last_paid_at)) {
+      hist = [...hist, { amount: Number(item.last_paid_amount), paid_at: item.last_paid_at }]
+    }
+    return hist
+  }, [item.payment_history, item.last_paid_amount, item.last_paid_at])
+
   // Update local state if the parent amount changes
   useEffect(() => {
     setLocalAmount(amount || '')
@@ -1473,12 +1501,12 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
           </div>
 
           {type === 'card' && (
-            <SpendingTrend payments={item.payment_history} />
+            <SpendingTrend payments={effectiveHistory} />
           )}
 
           {type === 'card' && (
             <PaymentHistory
-              payments={item.payment_history}
+              payments={effectiveHistory}
               onDeletePayment={(p) => onDeletePayment?.(item.id, p)}
             />
           )}
