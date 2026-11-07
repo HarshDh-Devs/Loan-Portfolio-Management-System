@@ -1069,11 +1069,12 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
   }
 
   return (
-    <div className={`bg-white border rounded-xl overflow-hidden transition-all ${
-      type === 'card'
-        ? `${cardRowClass(dueInfo.status)} ${bankMeta ? `border-l-4 ${bankMeta.borderLeft}` : ''}`
-        : 'border-gray-200'
+    <div className={`bg-white border rounded-xl overflow-hidden transition-all relative ${
+      type === 'card' ? cardRowClass(dueInfo.status) : 'border-gray-200'
     }`}>
+      {type === 'card' && bankMeta && (
+        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${bankMeta.barColor}`} />
+      )}
       <div className="py-3 px-4 sm:px-6 flex flex-wrap lg:flex-nowrap items-center gap-3 lg:gap-6">
         {dragHandle && (
           <button
@@ -1093,7 +1094,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
           <span className="text-sm font-medium text-gray-900 truncate">{item.nickname}</span>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             {type === 'card' && bankMeta && (
-              <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${bankMeta.badgeClass}`}>
+              <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${bankMeta.badgeClass}`}>
                 {bankMeta.name}
               </span>
             )}
@@ -1183,16 +1184,19 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
           </div>
         )}
 
-        {feeInfo && (
-          <div className="hidden xl:flex flex-col min-w-[150px] shrink-0">
+        {feeInfo && (feeInfo.waiver > 0 || feeInfo.feeHitsThisMonth) && (
+          <div className="hidden xl:flex flex-col min-w-[140px] shrink-0">
+            <span className="text-xs text-gray-400 uppercase tracking-wide">
+              {feeInfo.feeHitsThisMonth ? 'Annual Fee' : 'Waiver'}
+            </span>
             {feeInfo.feeHitsThisMonth && (
-              <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">
-                Fee {formatINR(feeInfo.feeAmount)} this month
+              <span className="text-xs font-semibold text-amber-700 mt-0.5">
+                {formatINR(feeInfo.feeAmount)} this month
               </span>
             )}
-            {feeInfo.waiver > 0 && (
-              <span className={`text-[10px] ${feeInfo.met ? 'text-emerald-600 font-semibold' : 'text-slate-500'}`}>
-                {feeInfo.met ? 'Waiver target met' : `${formatINR(feeInfo.remaining)} left to waive`}
+            {feeInfo.waiver > 0 && !feeInfo.feeHitsThisMonth && (
+              <span className={`text-xs font-semibold mt-0.5 ${feeInfo.met ? 'text-emerald-600' : 'text-slate-600'}`}>
+                {feeInfo.met ? 'Target met ✓' : `${formatINR(feeInfo.remaining)} left`}
               </span>
             )}
           </div>
@@ -1225,7 +1229,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
                 onChange={(e) => setLocalAmount(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Set bill"
-                className="w-24 px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/30 transition-all"
+                className="w-28 px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/30 transition-all placeholder:text-slate-400"
               />
               {localAmount.toString() !== (amount || '').toString() && (
                 <button
