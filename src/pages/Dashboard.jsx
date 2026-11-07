@@ -129,6 +129,25 @@ export default function Dashboard({ session }) {
 
         // Auto-reset disabled — user manually controls paid/unpaid status
 
+        // Backfill payment_history from last_paid for existing cards if not already recorded
+        cardsData = cardsData.map(card => {
+          if (card.last_paid_amount > 0 && card.last_paid_at) {
+            const hist = card.payment_history || []
+            const exists = hist.some(p => p.paid_at === card.last_paid_at)
+            if (!exists) {
+              cardsChanged = true
+              return {
+                ...card,
+                payment_history: [
+                  ...hist,
+                  { amount: Number(card.last_paid_amount), paid_at: card.last_paid_at }
+                ]
+              }
+            }
+          }
+          return card
+        })
+
         const ordered = ensureCardSortOrder(cardsData)
         cardsData = ordered.cards
         if (ordered.changed) cardsChanged = true
@@ -224,28 +243,25 @@ export default function Dashboard({ session }) {
     const updates = { paid: isPaid }
 
     if (isPaid) {
-      updates.total_paid = (item.total_paid || 0) + (type === 'card' ? (item.bill_amount || 0) : (item.amount || 0))
+      const paidAmt = type === 'card' ? (item.bill_amount || 0) : (item.amount || 0)
+      updates.total_paid = (item.total_paid || 0) + paidAmt
       if (type === 'card') {
-        updates.last_paid_amount = item.bill_amount || 0
+        updates.last_paid_amount = paidAmt
         updates.last_paid_at = new Date().toISOString()
-        // Record in payment history
-        updates.payment_history = [
-          ...(item.payment_history || []),
-          { amount: item.bill_amount || 0, paid_at: new Date().toISOString() }
-        ]
+        // Record in payment history (only if amount > 0)
+        if (paidAmt > 0) {
+          updates.payment_history = [
+            ...(item.payment_history || []),
+            { amount: paidAmt, paid_at: new Date().toISOString() }
+          ]
+        }
         updates.bill_amount = 0
         updates.settled_cycle = item.bill_cycle || getUpcomingDueCycleKey(item.due_date)
       } else {
         updates.amount = 0
       }
-    } else {
-      // Un-settling: remove the last payment entry (undo)
-      if (type === 'card' && item.payment_history?.length) {
-        const lastEntry = item.payment_history[item.payment_history.length - 1]
-        updates.payment_history = item.payment_history.slice(0, -1)
-        updates.total_paid = Math.max(0, (item.total_paid || 0) - (lastEntry.amount || 0))
-      }
     }
+    // When un-settling (paid -> false), payment_history and total_paid remain permanently preserved!
 
     if (type === 'card') {
       await updateCard(session, item.id, updates)
@@ -257,6 +273,20 @@ export default function Dashboard({ session }) {
       await updateExpense(session, item.id, updates)
       setExpenses(prev => prev.map(e => e.id === item.id ? { ...e, ...updates } : e))
     }
+  }
+
+  const handleDeletePayment = async (cardId, paymentToDelete) => {
+    if (!window.confirm(`Delete this payment of ₹${(paymentToDelete.amount || 0).toLocaleString('en-IN')}?`)) return
+    const card = cards.find(c => c.id === cardId)
+    if (!card) return
+
+    const newHistory = (card.payment_history || []).filter(p => p !== paymentToDelete && p.paid_at !== paymentToDelete.paid_at)
+    const updates = {
+      payment_history: newHistory,
+      total_paid: Math.max(0, (card.total_paid || 0) - (paymentToDelete.amount || 0))
+    }
+    await updateCard(session, cardId, updates)
+    setCards(prev => prev.map(c => c.id === cardId ? { ...c, ...updates } : c))
   }
 
   const handleDelete = async (type, id) => {
@@ -443,17 +473,15 @@ export default function Dashboard({ session }) {
           <div className="mt-4 bg-white rounded-xl border border-gray-200 p-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs text-gray-400 uppercase tracking-wide">Total Credit Utilization</p>
-              <span className={`text-xs font-bold uppercase tracking-widest ${
-                totalUtilization <= 30 ? 'text-emerald-600' : totalUtilization <= 70 ? 'text-amber-600' : 'text-rose-600'
-              }`}>
+              <span className={`text-xs font-bold uppercase tracking-widest ${totalUtilization <= 30 ? 'text-emerald-600' : totalUtilization <= 70 ? 'text-amber-600' : 'text-rose-600'
+                }`}>
                 {totalUtilization}%
               </span>
             </div>
             <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all ${
-                  totalUtilization <= 30 ? 'bg-emerald-500' : totalUtilization <= 70 ? 'bg-amber-500' : 'bg-rose-500'
-                }`}
+                className={`h-full rounded-full transition-all ${totalUtilization <= 30 ? 'bg-emerald-500' : totalUtilization <= 70 ? 'bg-amber-500' : 'bg-rose-500'
+                  }`}
                 style={{ width: `${totalUtilization}%` }}
               />
             </div>
@@ -517,6 +545,7 @@ export default function Dashboard({ session }) {
                       onUpdateNotes={(val) => updateNotes('card', card.id, val)}
                       onUpdateDueDate={(val) => updateDueDate('card', card.id, val)}
                       onEdit={() => setEditingCard(card)}
+                      onDeletePayment={handleDeletePayment}
                     />
                   ))}
                 </SortableContext>
@@ -527,12 +556,12 @@ export default function Dashboard({ session }) {
                         item={activeCard}
                         type="card"
                         isOverlay
-                        onTogglePaid={() => {}}
-                        onDelete={() => {}}
-                        onUpdateBill={() => {}}
-                        onUpdateTotalPaid={() => {}}
-                        onUpdateNotes={() => {}}
-                        onUpdateDueDate={() => {}}
+                        onTogglePaid={() => { }}
+                        onDelete={() => { }}
+                        onUpdateBill={() => { }}
+                        onUpdateTotalPaid={() => { }}
+                        onUpdateNotes={() => { }}
+                        onUpdateDueDate={() => { }}
                       />
                     </div>
                   ) : null}
@@ -893,7 +922,7 @@ function SpendingTrend({ payments }) {
 
 // ── Payment History Component ────────────────────────────────────────────────
 
-function PaymentHistory({ payments }) {
+function PaymentHistory({ payments, onDeletePayment }) {
   const [selectedFY, setSelectedFY] = useState(null)
 
   // Build FY → payments map
@@ -967,17 +996,28 @@ function PaymentHistory({ payments }) {
               {group.payments
                 .sort((a, b) => new Date(b.paid_at) - new Date(a.paid_at))
                 .map((p, i) => (
-                  <div key={i} className="flex items-center gap-3 text-sm">
-                    <span className="font-semibold text-slate-700">
-                      <span className="text-slate-400 mr-0.5 font-sans font-normal">₹</span>
-                      {(p.amount || 0).toLocaleString('en-IN')}
-                    </span>
-                    <span className="text-slate-400">—</span>
-                    <span className="text-slate-500 text-xs">
-                      {new Date(p.paid_at).toLocaleString('en-IN', {
-                        day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true
-                      })}
-                    </span>
+                  <div key={i} className="flex items-center justify-between text-sm group/pay py-0.5">
+                    <div className="flex items-center gap-3">
+                      <span className="font-semibold text-slate-700">
+                        <span className="text-slate-400 mr-0.5 font-sans font-normal">₹</span>
+                        {(p.amount || 0).toLocaleString('en-IN')}
+                      </span>
+                      <span className="text-slate-400">—</span>
+                      <span className="text-slate-500 text-xs">
+                        {new Date(p.paid_at).toLocaleString('en-IN', {
+                          day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true
+                        })}
+                      </span>
+                    </div>
+                    {onDeletePayment && (
+                      <button
+                        onClick={() => onDeletePayment(p)}
+                        className="opacity-0 group-hover/pay:opacity-100 text-slate-400 hover:text-rose-600 transition-all text-xs px-1.5 py-0.5 rounded hover:bg-rose-50"
+                        title="Delete this payment record"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 ))}
             </div>
@@ -1024,7 +1064,7 @@ function SortableItemCard({ card, disabled, ...itemProps }) {
   )
 }
 
-function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTotalPaid, onUpdateNotes, onUpdateDueDate, onEdit, dragHandle, isOverlay }) {
+function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTotalPaid, onUpdateNotes, onUpdateDueDate, onEdit, onDeletePayment, dragHandle, isOverlay }) {
   const [showDetails, setShowDetails] = useState(false)
   const [isEditingTotalPaid, setIsEditingTotalPaid] = useState(false)
   const [isEditingNotes, setIsEditingNotes] = useState(false)
@@ -1054,6 +1094,15 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
     ? dueInfo.caption
     : (upcomingDue ? formatDueCaption(upcomingDue) : (item.due_date ? getOrdinal(item.due_date) : '—'))
 
+  // Seamlessly incorporate existing last_paid into payment history if not yet recorded
+  const effectiveHistory = useMemo(() => {
+    let hist = item.payment_history || []
+    if (item.last_paid_amount > 0 && item.last_paid_at && !hist.some(p => p.paid_at === item.last_paid_at)) {
+      hist = [...hist, { amount: Number(item.last_paid_amount), paid_at: item.last_paid_at }]
+    }
+    return hist
+  }, [item.payment_history, item.last_paid_amount, item.last_paid_at])
+
   // Update local state if the parent amount changes
   useEffect(() => {
     setLocalAmount(amount || '')
@@ -1069,9 +1118,8 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
   }
 
   return (
-    <div className={`bg-white border rounded-xl overflow-hidden transition-all relative ${
-      type === 'card' ? cardRowClass(dueInfo.status) : 'border-gray-200'
-    }`}>
+    <div className={`bg-white border rounded-xl overflow-hidden transition-all relative ${type === 'card' ? cardRowClass(dueInfo.status) : 'border-gray-200'
+      }`}>
       {type === 'card' && bankMeta && (
         <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${bankMeta.barColor}`} />
       )}
@@ -1220,50 +1268,50 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
         )}
 
         {!isOverlay && (
-        <div className="flex-1 flex items-center gap-4 justify-end">
-          {type === 'card' && !isPaid && (
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                value={localAmount}
-                onChange={(e) => setLocalAmount(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Set bill"
-                className="w-28 px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/30 transition-all placeholder:text-slate-400"
-              />
-              {localAmount.toString() !== (amount || '').toString() && (
-                <button
-                  onClick={() => onUpdateBill(localAmount)}
-                  className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
-                >
-                  Save
-                </button>
-              )}
-            </div>
-          )}
+          <div className="flex-1 flex items-center gap-4 justify-end">
+            {type === 'card' && !isPaid && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={localAmount}
+                  onChange={(e) => setLocalAmount(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Set bill"
+                  className="w-28 px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/30 transition-all placeholder:text-slate-400"
+                />
+                {localAmount.toString() !== (amount || '').toString() && (
+                  <button
+                    onClick={() => onUpdateBill(localAmount)}
+                    className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
+                  >
+                    Save
+                  </button>
+                )}
+              </div>
+            )}
 
-          {type === 'card' && (
-            <button
-              onClick={onTogglePaid}
-              className={`px-5 py-1.5 text-[10px] font-bold rounded-full border transition-all shadow-sm tracking-widest uppercase ${isPaid
+            {type === 'card' && (
+              <button
+                onClick={onTogglePaid}
+                className={`px-5 py-1.5 text-[10px] font-bold rounded-full border transition-all shadow-sm tracking-widest uppercase ${isPaid
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-600 cursor-pointer hover:bg-emerald-100'
                   : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-500 hover:text-indigo-600 active:scale-95'
-                }`}
-            >
-              {isPaid ? 'Settled ✓' : 'Mark Paid'}
-            </button>
-          )}
+                  }`}
+              >
+                {isPaid ? 'Settled ✓' : 'Mark Paid'}
+              </button>
+            )}
 
-          <button
-            onClick={onDelete}
-            className="text-slate-400 hover:text-rose-600 transition-all p-1.5 rounded-lg hover:bg-rose-50 group/del"
-            title="Delete Item"
-          >
-            <svg className="w-4 h-4 transition-transform group-hover/del:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-          </button>
-        </div>
+            <button
+              onClick={onDelete}
+              className="text-slate-400 hover:text-rose-600 transition-all p-1.5 rounded-lg hover:bg-rose-50 group/del"
+              title="Delete Item"
+            >
+              <svg className="w-4 h-4 transition-transform group-hover/del:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          </div>
         )}
       </div>
 
@@ -1281,183 +1329,186 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
             )}
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-3">
-          {type === 'card' && (
-            <div className="space-y-0.5">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Full Card Name</p>
-              <p className="text-sm font-semibold text-slate-700">{item.card_name || '—'}</p>
-            </div>
-          )}
-
-          {type === 'card' && bankMeta && (
-            <div className="space-y-0.5">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Bank / Issuer</p>
-              <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full inline-block ${bankMeta.borderLeft.replace('border-l-', 'bg-')}`} />
-                {bankMeta.fullName}
-              </p>
-            </div>
-          )}
-
-          {type === 'card' && (
-            <div className="space-y-0.5">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Statement Date</p>
-              <p className="text-sm font-semibold text-slate-700">
-                {statementDay > 0 ? `${getOrdinal(statementDay)} of every month` : '—'}
-              </p>
-              {statementDay > 0 && item.due_date && (
-                <p className="text-[10px] text-slate-400">
-                  Statement → Due: ~{Math.abs(item.due_date - statementDay)} days gap
-                </p>
-              )}
-            </div>
-          )}
-
-          {type === 'card' && creditLimit > 0 && (
-            <div className="space-y-1 col-span-2">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Credit Limit & Utilization</p>
-              <p className="text-sm font-semibold text-slate-700">
-                {formatINR(creditUsed)} / {formatINR(creditLimit)}
-                <span className={`ml-2 text-xs font-bold ${utilPct <= 30 ? 'text-emerald-600' : utilPct <= 70 ? 'text-amber-600' : 'text-rose-600'}`}>
-                  {utilPct}% used
-                </span>
-              </p>
-              <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${utilPct <= 30 ? 'bg-emerald-500' : utilPct <= 70 ? 'bg-amber-500' : 'bg-rose-500'}`}
-                  style={{ width: `${utilPct}%` }}
-                />
-              </div>
-              <p className="text-[10px] text-slate-400">
-                {utilPct <= 30 ? 'Healthy utilization — good for credit score' : utilPct <= 70 ? 'Moderate utilization' : 'High utilization — may impact credit score'}
-              </p>
-            </div>
-          )}
-
-          {type === 'card' && item.last_paid_at && (
-            <div className="space-y-0.5">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Last paid</p>
-              <p className="text-sm font-semibold text-slate-700">{formatINR(item.last_paid_amount || 0)}</p>
-              <p className="text-[11px] text-slate-500">{formatDateTime(item.last_paid_at)}</p>
-            </div>
-          )}
-
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total Paid</p>
-              <button
-                onClick={() => setIsEditingTotalPaid(!isEditingTotalPaid)}
-                className="text-[9px] font-bold text-indigo-500 hover:text-indigo-600 uppercase tracking-widest"
-              >
-                {isEditingTotalPaid ? 'Cancel' : 'Edit'}
-              </button>
-            </div>
-            {isEditingTotalPaid ? (
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={localTotalPaid}
-                  onChange={(e) => setLocalTotalPaid(e.target.value)}
-                  className="w-24 px-2 py-0.5 text-xs font-mono border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
-                />
-                <button
-                  onClick={() => {
-                    onUpdateTotalPaid(localTotalPaid)
-                    setIsEditingTotalPaid(false)
-                  }}
-                  className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
-                >
-                  Save
-                </button>
-              </div>
-            ) : (
-              <p className="text-sm font-mono font-semibold text-slate-700">{formatINR(item.total_paid || 0)}</p>
-            )}
-          </div>
-
-          {type === 'card' && (
-            <>
+            {type === 'card' && (
               <div className="space-y-0.5">
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Annual Fee</p>
-                <p className="text-sm font-semibold text-slate-700">
-                  {item.annual_fee_type === 'LTF'
-                    ? <span className="text-emerald-600">LTF</span>
-                    : `${formatINR(item.annual_fee)} in ${item.fee_month || '—'}`
-                  }
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Full Card Name</p>
+                <p className="text-sm font-semibold text-slate-700">{item.card_name || '—'}</p>
+              </div>
+            )}
+
+            {type === 'card' && bankMeta && (
+              <div className="space-y-0.5">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Bank / Issuer</p>
+                <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full inline-block ${bankMeta.borderLeft.replace('border-l-', 'bg-')}`} />
+                  {bankMeta.fullName}
                 </p>
-                {feeInfo?.feeHitsThisMonth && (
-                  <p className="text-[11px] font-medium text-amber-700">Fee hits this statement cycle</p>
+              </div>
+            )}
+
+            {type === 'card' && (
+              <div className="space-y-0.5">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Statement Date</p>
+                <p className="text-sm font-semibold text-slate-700">
+                  {statementDay > 0 ? `${getOrdinal(statementDay)} of every month` : '—'}
+                </p>
+                {statementDay > 0 && item.due_date && (
+                  <p className="text-[10px] text-slate-400">
+                    Statement → Due: ~{Math.abs(item.due_date - statementDay)} days gap
+                  </p>
                 )}
               </div>
-              {feeInfo && feeInfo.waiver > 0 && (
-                <div className="space-y-1 col-span-2">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Waiver progress</p>
-                  <p className="text-sm font-semibold text-slate-700">
-                    {formatINR(feeInfo.spent)} / {formatINR(feeInfo.waiver)}
-                    {feeInfo.met
-                      ? <span className="ml-2 text-emerald-600 text-xs">Target met</span>
-                      : <span className="ml-2 text-slate-500 text-xs">{formatINR(feeInfo.remaining)} left</span>}
-                  </p>
-                  <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${feeInfo.met ? 'bg-emerald-500' : 'bg-indigo-500'}`}
-                      style={{ width: `${feeInfo.pct}%` }}
-                    />
-                  </div>
-                  <p className="text-[10px] text-slate-400">
-                    {feeInfo.periodLabel
-                      ? `Tracking period: ${feeInfo.periodLabel} (resets on anniversary)`
-                      : 'Set a fee month to track anniversary-year spend automatically'}
-                  </p>
-                </div>
-              )}
-            </>
-          )}
+            )}
 
-          <div className="space-y-0.5 col-span-2">
-            <div className="flex items-center gap-2">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Notes</p>
-              <button
-                onClick={() => setIsEditingNotes(!isEditingNotes)}
-                className="text-[9px] font-bold text-indigo-500 hover:text-indigo-600 uppercase tracking-widest"
-              >
-                {isEditingNotes ? 'Cancel' : (item.notes ? 'Edit' : '+ Add Note')}
-              </button>
-            </div>
-            {isEditingNotes ? (
-              <div className="flex flex-col gap-2 mt-1">
-                <textarea
-                  value={localNotes}
-                  onChange={(e) => setLocalNotes(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
-                  rows="2"
-                  placeholder="Enter note..."
-                />
+            {type === 'card' && creditLimit > 0 && (
+              <div className="space-y-1 col-span-2">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Credit Limit & Utilization</p>
+                <p className="text-sm font-semibold text-slate-700">
+                  {formatINR(creditUsed)} / {formatINR(creditLimit)}
+                  <span className={`ml-2 text-xs font-bold ${utilPct <= 30 ? 'text-emerald-600' : utilPct <= 70 ? 'text-amber-600' : 'text-rose-600'}`}>
+                    {utilPct}% used
+                  </span>
+                </p>
+                <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${utilPct <= 30 ? 'bg-emerald-500' : utilPct <= 70 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                    style={{ width: `${utilPct}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  {utilPct <= 30 ? 'Healthy utilization — good for credit score' : utilPct <= 70 ? 'Moderate utilization' : 'High utilization — may impact credit score'}
+                </p>
+              </div>
+            )}
+
+            {type === 'card' && item.last_paid_at && (
+              <div className="space-y-0.5">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Last paid</p>
+                <p className="text-sm font-semibold text-slate-700">{formatINR(item.last_paid_amount || 0)}</p>
+                <p className="text-[11px] text-slate-500">{formatDateTime(item.last_paid_at)}</p>
+              </div>
+            )}
+
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total Paid</p>
                 <button
-                  onClick={() => {
-                    onUpdateNotes(localNotes)
-                    setIsEditingNotes(false)
-                  }}
-                  className="self-end px-3 py-1 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 uppercase tracking-widest transition-all"
+                  onClick={() => setIsEditingTotalPaid(!isEditingTotalPaid)}
+                  className="text-[9px] font-bold text-indigo-500 hover:text-indigo-600 uppercase tracking-widest"
                 >
-                  Save
+                  {isEditingTotalPaid ? 'Cancel' : 'Edit'}
                 </button>
               </div>
-            ) : (
-              item.notes ? (
-                <p className="text-sm text-slate-600 italic">"{item.notes}"</p>
+              {isEditingTotalPaid ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={localTotalPaid}
+                    onChange={(e) => setLocalTotalPaid(e.target.value)}
+                    className="w-24 px-2 py-0.5 text-xs font-mono border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                  />
+                  <button
+                    onClick={() => {
+                      onUpdateTotalPaid(localTotalPaid)
+                      setIsEditingTotalPaid(false)
+                    }}
+                    className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
+                  >
+                    Save
+                  </button>
+                </div>
               ) : (
-                <p className="text-xs text-slate-400 italic">No notes added</p>
-              )
+                <p className="text-sm font-mono font-semibold text-slate-700">{formatINR(item.total_paid || 0)}</p>
+              )}
+            </div>
+
+            {type === 'card' && (
+              <>
+                <div className="space-y-0.5">
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Annual Fee</p>
+                  <p className="text-sm font-semibold text-slate-700">
+                    {item.annual_fee_type === 'LTF'
+                      ? <span className="text-emerald-600">LTF</span>
+                      : `${formatINR(item.annual_fee)} in ${item.fee_month || '—'}`
+                    }
+                  </p>
+                  {feeInfo?.feeHitsThisMonth && (
+                    <p className="text-[11px] font-medium text-amber-700">Fee hits this statement cycle</p>
+                  )}
+                </div>
+                {feeInfo && feeInfo.waiver > 0 && (
+                  <div className="space-y-1 col-span-2">
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Waiver progress</p>
+                    <p className="text-sm font-semibold text-slate-700">
+                      {formatINR(feeInfo.spent)} / {formatINR(feeInfo.waiver)}
+                      {feeInfo.met
+                        ? <span className="ml-2 text-emerald-600 text-xs">Target met</span>
+                        : <span className="ml-2 text-slate-500 text-xs">{formatINR(feeInfo.remaining)} left</span>}
+                    </p>
+                    <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${feeInfo.met ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+                        style={{ width: `${feeInfo.pct}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      {feeInfo.periodLabel
+                        ? `Tracking period: ${feeInfo.periodLabel} (resets on anniversary)`
+                        : 'Set a fee month to track anniversary-year spend automatically'}
+                    </p>
+                  </div>
+                )}
+              </>
             )}
-          </div>
+
+            <div className="space-y-0.5 col-span-2">
+              <div className="flex items-center gap-2">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Notes</p>
+                <button
+                  onClick={() => setIsEditingNotes(!isEditingNotes)}
+                  className="text-[9px] font-bold text-indigo-500 hover:text-indigo-600 uppercase tracking-widest"
+                >
+                  {isEditingNotes ? 'Cancel' : (item.notes ? 'Edit' : '+ Add Note')}
+                </button>
+              </div>
+              {isEditingNotes ? (
+                <div className="flex flex-col gap-2 mt-1">
+                  <textarea
+                    value={localNotes}
+                    onChange={(e) => setLocalNotes(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                    rows="2"
+                    placeholder="Enter note..."
+                  />
+                  <button
+                    onClick={() => {
+                      onUpdateNotes(localNotes)
+                      setIsEditingNotes(false)
+                    }}
+                    className="self-end px-3 py-1 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 uppercase tracking-widest transition-all"
+                  >
+                    Save
+                  </button>
+                </div>
+              ) : (
+                item.notes ? (
+                  <p className="text-sm text-slate-600 italic">"{item.notes}"</p>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">No notes added</p>
+                )
+              )}
+            </div>
           </div>
 
           {type === 'card' && (
-            <SpendingTrend payments={item.payment_history} />
+            <SpendingTrend payments={effectiveHistory} />
           )}
 
           {type === 'card' && (
-            <PaymentHistory payments={item.payment_history} />
+            <PaymentHistory
+              payments={effectiveHistory}
+              onDeletePayment={(p) => onDeletePayment?.(item.id, p)}
+            />
           )}
         </div>
       )}
