@@ -19,10 +19,10 @@ import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import { getLoans } from '../data/hybridStorage'
 import { getCurrentLoanState } from '../math/engine'
 import {
-  getSettings, saveSettings,
-  getCards, addCard, updateCard, deleteCard, reorderCards, patchFinanceData,
-  getSubscriptions, addSubscription, updateSubscription, deleteSubscription,
-  getExpenses, addExpense, updateExpense, deleteExpense
+  loadAllFinanceData, saveSettings,
+  addCard, updateCard, deleteCard, reorderCards, patchFinanceData,
+  addSubscription, updateSubscription, deleteSubscription,
+  addExpense, updateExpense, deleteExpense
 } from '../data/financeStorage'
 import { formatINR, formatDateTime } from '../utils/format'
 import {
@@ -40,6 +40,7 @@ import {
   nextCardCycleUpdates,
   normalizeMonthKey,
 } from '../utils/cardDue'
+import { getCardBank, BANK_LIST } from '../utils/bankBrands'
 import Navbar from '../components/Navbar'
 
 const DASHBOARD_THEME_KEY = 'lpms_dashboard_dark'
@@ -64,13 +65,18 @@ export default function Dashboard({ session }) {
   const [expenses, setExpenses] = useState([])
   const [loans, setLoans] = useState([])
   const [loanSort, setLoanSort] = useState('none')
-  const [cardSort, setCardSort] = useState('due')
+  const [cardSort, setCardSort] = useState('none')
   const [subscriptionSort, setSubscriptionSort] = useState('none')
   const [expenseSort, setExpenseSort] = useState('none')
   const [activeCardId, setActiveCardId] = useState(null)
   const [editingCard, setEditingCard] = useState(null)
 
   const [showModal, setShowModal] = useState(null) // 'card', 'subscription', 'emi', 'expense'
+
+  // Credit Card Utilization aggregate
+  const totalCreditLimit = cards.reduce((sum, c) => sum + (Number(c.credit_limit) || 0), 0)
+  const totalCreditUsed = cards.reduce((sum, c) => sum + (c.paid ? 0 : (c.bill_amount || 0)), 0)
+  const totalUtilization = totalCreditLimit > 0 ? Math.min(100, Math.round((totalCreditUsed / totalCreditLimit) * 100)) : null
   const [darkMode, setDarkMode] = useState(readDashboardDark)
 
   const toggleDarkMode = () => {
@@ -92,43 +98,36 @@ export default function Dashboard({ session }) {
   useEffect(() => {
     async function loadData() {
       try {
-        const [s, c, sub, exp, l] = await Promise.all([
-          getSettings(session),
-          getCards(session),
-          getSubscriptions(session),
-          getExpenses(session),
+        // Single load — reads the blob once instead of 4 separate reads
+        const [finData, l] = await Promise.all([
+          loadAllFinanceData(session),
           getLoans(session)
         ])
+
+        const { settings: s } = finData
+        let { cards: cardsData, subscriptions: subsData, expenses: expsData } = finData
 
         const now = new Date()
         const currentMonthKey = monthKey(now)
         const lastReset = normalizeMonthKey(s.last_reset_month)
         const monthChanged = Boolean(lastReset && lastReset !== currentMonthKey)
 
-        let cardsData = c
-        let subsData = sub
-        let expsData = exp
         let cardsChanged = false
 
         // Calendar-month rollover is only for subscriptions/expenses.
         // Credit card bills follow each card's due day, not the 1st.
         if (monthChanged) {
-          subsData = sub.map(item => ({
+          subsData = subsData.map(item => ({
             ...item,
             total_paid: (item.total_paid || 0) + (item.amount || 0)
           }))
-          expsData = exp.map(item => ({
+          expsData = expsData.map(item => ({
             ...item,
             total_paid: (item.total_paid || 0) + (item.amount || 0)
           }))
         }
 
-        cardsData = cardsData.map(card => {
-          const updates = nextCardCycleUpdates(card, now, monthChanged)
-          if (!updates) return card
-          cardsChanged = true
-          return { ...card, ...updates }
-        })
+        // Auto-reset disabled — user manually controls paid/unpaid status
 
         const ordered = ensureCardSortOrder(cardsData)
         cardsData = ordered.cards
@@ -139,7 +138,7 @@ export default function Dashboard({ session }) {
             d.cards = cardsData
             d.subscriptions = subsData
             d.expenses = expsData
-            d.settings = { ...(d.settings || {}), ...(s || {}), last_reset_month: currentMonthKey }
+            d.settings = { ...(d.settings || {}), ...s, last_reset_month: currentMonthKey }
           })
         }
 
@@ -229,10 +228,22 @@ export default function Dashboard({ session }) {
       if (type === 'card') {
         updates.last_paid_amount = item.bill_amount || 0
         updates.last_paid_at = new Date().toISOString()
+        // Record in payment history
+        updates.payment_history = [
+          ...(item.payment_history || []),
+          { amount: item.bill_amount || 0, paid_at: new Date().toISOString() }
+        ]
         updates.bill_amount = 0
         updates.settled_cycle = item.bill_cycle || getUpcomingDueCycleKey(item.due_date)
       } else {
         updates.amount = 0
+      }
+    } else {
+      // Un-settling: remove the last payment entry (undo)
+      if (type === 'card' && item.payment_history?.length) {
+        const lastEntry = item.payment_history[item.payment_history.length - 1]
+        updates.payment_history = item.payment_history.slice(0, -1)
+        updates.total_paid = Math.max(0, (item.total_paid || 0) - (lastEntry.amount || 0))
       }
     }
 
@@ -426,6 +437,31 @@ export default function Dashboard({ session }) {
           </div>
 
         </div>
+
+        {/* Credit Utilization Bar (only if any card has credit_limit set) */}
+        {totalCreditLimit > 0 && (
+          <div className="mt-4 bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Total Credit Utilization</p>
+              <span className={`text-xs font-bold uppercase tracking-widest ${
+                totalUtilization <= 30 ? 'text-emerald-600' : totalUtilization <= 70 ? 'text-amber-600' : 'text-rose-600'
+              }`}>
+                {totalUtilization}%
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  totalUtilization <= 30 ? 'bg-emerald-500' : totalUtilization <= 70 ? 'bg-amber-500' : 'bg-rose-500'
+                }`}
+                style={{ width: `${totalUtilization}%` }}
+              />
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1.5">
+              {formatINR(totalCreditUsed)} used of {formatINR(totalCreditLimit)} total limit across {cards.filter(c => c.credit_limit > 0).length} card{cards.filter(c => c.credit_limit > 0).length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-10 space-y-12">
@@ -560,42 +596,45 @@ export default function Dashboard({ session }) {
               .map(loan => {
                 const state = loan.state
                 return (
-                  <div key={loan.id} className="bg-white border border-gray-200 rounded-xl py-3 px-6 flex items-center gap-12 transition-all">
-                    <div className="flex flex-col w-[240px] shrink-0">
+                  <div key={loan.id} className="bg-white border border-gray-200 rounded-xl py-3 px-6 flex items-center gap-6 lg:gap-10 transition-all">
+                    <div className="flex flex-col w-[220px] min-w-[180px] shrink-0">
                       <span className="text-sm font-medium text-gray-900 truncate">{loan.nickname}</span>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Loan Profile</span>
+                        {loan.type === 'Credit Card' && (
+                          <span
+                            className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full uppercase tracking-widest shrink-0"
+                            title="Billed directly inside your credit card statement; not counted twice in total bills"
+                          >
+                            Billed in CC
+                          </span>
+                        )}
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-[120px_200px_auto] gap-4 text-sm text-gray-500 shrink-0">
+                    <div className="grid grid-cols-3 gap-4 sm:gap-8 text-sm text-gray-500 shrink-0">
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[65px]">Next Due</span>
                         <span className="text-gray-700 font-medium">{getOrdinal(new Date(state.nextEmiDate).getDate())}</span>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[75px]">EMI Amt</span>
+                        <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[65px]">EMI Amt</span>
                         <span className="font-semibold text-gray-900">
-                          <span className="text-gray-400 mr-0.5 font-sans font-normal">₹</span>{(loan.emiAmount || 0).toLocaleString('en-IN')}
+                          {formatINR(Math.round(loan.emiAmount || 0))}
                         </span>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[45px]">Term</span>
+                        <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[40px]">Term</span>
                         <span className="text-green-600 font-semibold">{state.emisPaid}/{loan.tenureMonths}</span>
-                        {loan.type === 'Credit Card' && (
-                          <span className="ml-4 text-[11px] text-slate-400">
-                            (Not reflected in total bill as it is included in credit card bill)
-                          </span>
-                        )}
                       </div>
                     </div>
 
                     <div className="flex-1 flex items-center gap-4 justify-end">
                       <button
                         onClick={() => navigate('/loans')}
-                        className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 uppercase tracking-widest transition-colors"
+                        className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 uppercase tracking-widest transition-colors whitespace-nowrap"
                       >
                         Manage in Loans
                       </button>
@@ -742,6 +781,223 @@ function getOrdinal(n) {
   return n + (s[(v - 20) % 10] || s[v] || s[0])
 }
 
+// ── Financial Year helpers (Indian FY: April 1 → March 31) ──────────────────
+
+function getFYKey(date) {
+  const month = date.getMonth() // 0-indexed, Jan=0
+  const year = date.getFullYear()
+  const fyStartYear = month >= 3 ? year : year - 1
+  return `${fyStartYear}-${fyStartYear + 1}`
+}
+
+function getFYLabel(key) {
+  const [start, end] = key.split('-')
+  return `FY ${start.slice(-2)}-${end.slice(-2)}`
+}
+
+function getCurrentFYKey() {
+  return getFYKey(new Date())
+}
+
+// ── Spending Trend Chart (SVG bar chart from payment_history) ─────────────────
+
+function SpendingTrend({ payments }) {
+  const monthData = useMemo(() => {
+    if (!payments?.length) return []
+
+    // Group payments by month, last 12 months
+    const now = new Date()
+    const months = []
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const label = d.toLocaleDateString('en-IN', { month: 'short' })
+      months.push({ key, label, total: 0 })
+    }
+
+    const monthMap = Object.fromEntries(months.map(m => [m.key, m]))
+    for (const p of payments) {
+      if (!p.paid_at) continue
+      const d = new Date(p.paid_at)
+      if (isNaN(d)) continue
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      if (monthMap[key]) monthMap[key].total += (p.amount || 0)
+    }
+
+    return months
+  }, [payments])
+
+  if (!payments?.length || monthData.length === 0) return null
+
+  const maxVal = Math.max(...monthData.map(m => m.total), 1)
+  const hasAnyData = monthData.some(m => m.total > 0)
+  if (!hasAnyData) return null
+
+  const barWidth = 20
+  const gap = 6
+  const chartHeight = 80
+  const labelHeight = 18
+  const svgWidth = monthData.length * (barWidth + gap)
+  const svgHeight = chartHeight + labelHeight
+
+  return (
+    <div className="mt-4 pt-4 border-t border-slate-100">
+      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-3">Spending Trend (Last 12 Months)</p>
+      <div className="overflow-x-auto pb-1">
+        <svg width={svgWidth} height={svgHeight} className="block">
+          {monthData.map((m, i) => {
+            const barH = m.total > 0 ? Math.max(3, (m.total / maxVal) * (chartHeight - 16)) : 0
+            const x = i * (barWidth + gap)
+            const y = chartHeight - barH
+            return (
+              <g key={m.key}>
+                {/* Bar */}
+                <rect
+                  x={x}
+                  y={y}
+                  width={barWidth}
+                  height={barH}
+                  rx={3}
+                  className={m.total > 0 ? 'fill-indigo-400' : 'fill-slate-100'}
+                />
+                {/* Amount label above bar (only if > 0) */}
+                {m.total > 0 && (
+                  <text
+                    x={x + barWidth / 2}
+                    y={y - 3}
+                    textAnchor="middle"
+                    className="fill-slate-500"
+                    style={{ fontSize: '8px', fontWeight: 600 }}
+                  >
+                    {m.total >= 1000 ? `${(m.total / 1000).toFixed(0)}k` : m.total}
+                  </text>
+                )}
+                {/* Month label */}
+                <text
+                  x={x + barWidth / 2}
+                  y={chartHeight + 12}
+                  textAnchor="middle"
+                  className="fill-slate-400"
+                  style={{ fontSize: '8px', fontWeight: 600, textTransform: 'uppercase' }}
+                >
+                  {m.label}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+    </div>
+  )
+}
+
+// ── Payment History Component ────────────────────────────────────────────────
+
+function PaymentHistory({ payments }) {
+  const [selectedFY, setSelectedFY] = useState(null)
+
+  // Build FY → payments map
+  const { fyMap, fyKeys } = useMemo(() => {
+    const map = {}
+    for (const p of (payments || [])) {
+      if (!p.paid_at) continue
+      const d = new Date(p.paid_at)
+      if (isNaN(d)) continue
+      const fy = getFYKey(d)
+      if (!map[fy]) map[fy] = []
+      map[fy].push(p)
+    }
+    const keys = Object.keys(map).sort().reverse() // newest FY first
+    return { fyMap: map, fyKeys: keys }
+  }, [payments])
+
+  const activeFY = selectedFY && fyMap[selectedFY] ? selectedFY : (fyKeys[0] || getCurrentFYKey())
+  const fyPayments = fyMap[activeFY] || []
+
+  // Group payments within selected FY by month (newest month first)
+  const monthGroups = useMemo(() => {
+    const groups = {}
+    for (const p of fyPayments) {
+      const d = new Date(p.paid_at)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const label = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+      if (!groups[key]) groups[key] = { label, payments: [] }
+      groups[key].payments.push(p)
+    }
+    return Object.entries(groups)
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([, v]) => v)
+  }, [fyPayments])
+
+  const fyTotal = fyPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+
+  if (!payments?.length) {
+    return (
+      <div className="mt-4 pt-4 border-t border-slate-100">
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Payment History</p>
+        <p className="text-xs text-slate-400 italic">No payment history yet. Payments will appear here when you mark bills as paid.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-4 pt-4 border-t border-slate-100">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Payment History</p>
+        {fyKeys.length > 0 && (
+          <select
+            value={activeFY}
+            onChange={(e) => setSelectedFY(e.target.value)}
+            className="text-[10px] font-bold text-indigo-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 uppercase tracking-widest cursor-pointer outline-none hover:border-indigo-300 transition-all shadow-sm"
+          >
+            {fyKeys.map(fy => (
+              <option key={fy} value={fy}>{getFYLabel(fy)}</option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        {monthGroups.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">No payments in {getFYLabel(activeFY)}</p>
+        ) : monthGroups.map((group) => (
+          <div key={group.label}>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">{group.label}</p>
+            <div className="space-y-1 pl-3 border-l-2 border-slate-100">
+              {group.payments
+                .sort((a, b) => new Date(b.paid_at) - new Date(a.paid_at))
+                .map((p, i) => (
+                  <div key={i} className="flex items-center gap-3 text-sm">
+                    <span className="font-semibold text-slate-700">
+                      <span className="text-slate-400 mr-0.5 font-sans font-normal">₹</span>
+                      {(p.amount || 0).toLocaleString('en-IN')}
+                    </span>
+                    <span className="text-slate-400">—</span>
+                    <span className="text-slate-500 text-xs">
+                      {new Date(p.paid_at).toLocaleString('en-IN', {
+                        day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true
+                      })}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 pt-2 border-t border-slate-200 flex items-center justify-between">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+          {getFYLabel(activeFY)} Total
+        </span>
+        <span className="text-sm font-bold text-slate-700">
+          <span className="text-slate-400 mr-0.5 font-sans font-normal">₹</span>
+          {fyTotal.toLocaleString('en-IN')}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function SortableItemCard({ card, disabled, ...itemProps }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
@@ -785,6 +1041,15 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
   const statusMeta = dueInfo ? CARD_STATUS[dueInfo.status] : null
   const feeInfo = type === 'card' ? getFeeWaiverInfo(item) : null
   const upcomingDue = item.due_date ? getUpcomingDueDate(item.due_date) : null
+
+  // Credit limit utilization for this card
+  const creditLimit = Number(item.credit_limit) || 0
+  const creditUsed = type === 'card' && !item.paid ? (item.bill_amount || 0) : 0
+  const utilPct = creditLimit > 0 ? Math.min(100, Math.round((creditUsed / creditLimit) * 100)) : null
+
+  // Statement date info
+  const statementDay = type === 'card' ? (Number(item.statement_date) || 0) : 0
+  const bankMeta = type === 'card' ? getCardBank(item) : null
   const dueLabel = type === 'card'
     ? dueInfo.caption
     : (upcomingDue ? formatDueCaption(upcomingDue) : (item.due_date ? getOrdinal(item.due_date) : '—'))
@@ -804,7 +1069,11 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
   }
 
   return (
-    <div className={`bg-white border rounded-xl overflow-hidden transition-all ${type === 'card' ? cardRowClass(dueInfo.status) : 'border-gray-200'}`}>
+    <div className={`bg-white border rounded-xl overflow-hidden transition-all ${
+      type === 'card'
+        ? `${cardRowClass(dueInfo.status)} ${bankMeta ? `border-l-4 ${bankMeta.borderLeft}` : ''}`
+        : 'border-gray-200'
+    }`}>
       <div className="py-3 px-4 sm:px-6 flex flex-wrap lg:flex-nowrap items-center gap-3 lg:gap-6">
         {dragHandle && (
           <button
@@ -822,11 +1091,18 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
 
         <div className="flex flex-col w-[200px] min-w-[160px] shrink-0">
           <span className="text-sm font-medium text-gray-900 truncate">{item.nickname}</span>
-          {type === 'card' && statusMeta && (
-            <span className={`mt-1 w-fit text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${statusMeta.className}`}>
-              {statusMeta.label}
-            </span>
-          )}
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            {type === 'card' && bankMeta && (
+              <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${bankMeta.badgeClass}`}>
+                {bankMeta.name}
+              </span>
+            )}
+            {type === 'card' && statusMeta && (
+              <span className={`w-fit text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${statusMeta.className}`}>
+                {statusMeta.label}
+              </span>
+            )}
+          </div>
           {!isOverlay && (
             <button
               onClick={() => setShowDetails(!showDetails)}
@@ -922,6 +1198,23 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
           </div>
         )}
 
+        {type === 'card' && utilPct !== null && (
+          <div className="hidden lg:flex flex-col min-w-[100px] shrink-0">
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Utilization</span>
+            <div className="flex items-center gap-2 mt-0.5">
+              <div className="h-1.5 flex-1 rounded-full bg-slate-100 overflow-hidden min-w-[60px]">
+                <div
+                  className={`h-full rounded-full ${utilPct <= 30 ? 'bg-emerald-500' : utilPct <= 70 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                  style={{ width: `${utilPct}%` }}
+                />
+              </div>
+              <span className={`text-[10px] font-bold ${utilPct <= 30 ? 'text-emerald-600' : utilPct <= 70 ? 'text-amber-600' : 'text-rose-600'}`}>
+                {utilPct}%
+              </span>
+            </div>
+          </div>
+        )}
+
         {!isOverlay && (
         <div className="flex-1 flex items-center gap-4 justify-end">
           {type === 'card' && !isPaid && (
@@ -988,6 +1281,51 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
             <div className="space-y-0.5">
               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Full Card Name</p>
               <p className="text-sm font-semibold text-slate-700">{item.card_name || '—'}</p>
+            </div>
+          )}
+
+          {type === 'card' && bankMeta && (
+            <div className="space-y-0.5">
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Bank / Issuer</p>
+              <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full inline-block ${bankMeta.borderLeft.replace('border-l-', 'bg-')}`} />
+                {bankMeta.fullName}
+              </p>
+            </div>
+          )}
+
+          {type === 'card' && (
+            <div className="space-y-0.5">
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Statement Date</p>
+              <p className="text-sm font-semibold text-slate-700">
+                {statementDay > 0 ? `${getOrdinal(statementDay)} of every month` : '—'}
+              </p>
+              {statementDay > 0 && item.due_date && (
+                <p className="text-[10px] text-slate-400">
+                  Statement → Due: ~{Math.abs(item.due_date - statementDay)} days gap
+                </p>
+              )}
+            </div>
+          )}
+
+          {type === 'card' && creditLimit > 0 && (
+            <div className="space-y-1 col-span-2">
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Credit Limit & Utilization</p>
+              <p className="text-sm font-semibold text-slate-700">
+                {formatINR(creditUsed)} / {formatINR(creditLimit)}
+                <span className={`ml-2 text-xs font-bold ${utilPct <= 30 ? 'text-emerald-600' : utilPct <= 70 ? 'text-amber-600' : 'text-rose-600'}`}>
+                  {utilPct}% used
+                </span>
+              </p>
+              <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${utilPct <= 30 ? 'bg-emerald-500' : utilPct <= 70 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                  style={{ width: `${utilPct}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-400">
+                {utilPct <= 30 ? 'Healthy utilization — good for credit score' : utilPct <= 70 ? 'Moderate utilization' : 'High utilization — may impact credit score'}
+              </p>
             </div>
           )}
 
@@ -1061,7 +1399,11 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
                       style={{ width: `${feeInfo.pct}%` }}
                     />
                   </div>
-                  <p className="text-[10px] text-slate-400">Uses recorded payments (edit Total Paid if this should track spend instead).</p>
+                  <p className="text-[10px] text-slate-400">
+                    {feeInfo.periodLabel
+                      ? `Tracking period: ${feeInfo.periodLabel} (resets on anniversary)`
+                      : 'Set a fee month to track anniversary-year spend automatically'}
+                  </p>
                 </div>
               )}
             </>
@@ -1105,6 +1447,14 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
             )}
           </div>
           </div>
+
+          {type === 'card' && (
+            <SpendingTrend payments={item.payment_history} />
+          )}
+
+          {type === 'card' && (
+            <PaymentHistory payments={item.payment_history} />
+          )}
         </div>
       )}
     </div>
@@ -1122,6 +1472,9 @@ function AddModal({ type, editItem, onClose, onAdd }) {
   const [feeMonth, setFeeMonth] = useState(editItem?.fee_month || '')
   const [waiverAmount, setWaiverAmount] = useState(editItem?.waiver_amount ?? '')
   const [notes, setNotes] = useState(editItem?.notes || '')
+  const [creditLimit, setCreditLimit] = useState(editItem?.credit_limit ?? '')
+  const [statementDate, setStatementDate] = useState(editItem?.statement_date || '')
+  const [bank, setBank] = useState(editItem?.bank || '')
 
   const titles = {
     card: isEdit ? 'Edit Credit Card' : 'Add Credit Card',
@@ -1149,6 +1502,9 @@ function AddModal({ type, editItem, onClose, onAdd }) {
       data.annual_fee = feeType === 'paid' ? parseFloat(annualFee) : null
       data.fee_month = feeType === 'paid' ? feeMonth : null
       data.waiver_amount = feeType === 'paid' ? parseFloat(waiverAmount) : null
+      data.credit_limit = parseFloat(creditLimit) || null
+      data.statement_date = statementDate === '' || statementDate == null ? null : parseInt(statementDate, 10)
+      data.bank = bank || null
       if (!isEdit) data.bill_amount = 0
     } else {
       data.amount = parseFloat(amount) || 0
@@ -1190,6 +1546,22 @@ function AddModal({ type, editItem, onClose, onAdd }) {
             </div>
           )}
 
+          {type === 'card' && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Bank / Issuer</label>
+              <select
+                value={bank}
+                onChange={e => setBank(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm bg-white"
+              >
+                <option value="">Auto-detect from card name</option>
+                {BANK_LIST.map(b => (
+                  <option key={b.id} value={b.id}>{b.fullName} ({b.name})</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {type !== 'card' && (
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Amount (₹)</label>
@@ -1214,6 +1586,34 @@ function AddModal({ type, editItem, onClose, onAdd }) {
               placeholder="e.g. 15"
             />
           </div>
+
+          {type === 'card' && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Statement Date (Day of Month)</label>
+              <input
+                type="number"
+                min="1" max="31"
+                value={statementDate}
+                onChange={e => setStatementDate(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
+                placeholder="e.g. 1"
+              />
+              <p className="text-[10px] text-slate-400">Day when your monthly statement is generated</p>
+            </div>
+          )}
+
+          {type === 'card' && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Credit Limit (₹)</label>
+              <input
+                type="number"
+                value={creditLimit}
+                onChange={e => setCreditLimit(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
+                placeholder="e.g. 200000"
+              />
+            </div>
+          )}
 
           {type === 'card' && (
             <>
