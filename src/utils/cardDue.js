@@ -188,13 +188,57 @@ export function cardRowClass(status) {
   return 'border-gray-200'
 }
 
+/**
+ * Compute the current card anniversary period based on the fee month.
+ * Indian banks track waiver spend on a 12-month cycle starting from the
+ * anniversary/fee month — NOT calendar year or financial year.
+ *
+ * e.g. fee_month = "August" and today is Nov 2026:
+ *   → period is Aug 2026 → Jul 2027 (current anniversary year)
+ *
+ * e.g. fee_month = "August" and today is May 2026:
+ *   → period is Aug 2025 → Jul 2026 (still in previous anniversary year)
+ */
+export function getAnniversaryPeriod(feeMonthName, today = new Date()) {
+  const feeMonthIndex = MONTH_NAMES.indexOf(feeMonthName)
+  if (feeMonthIndex < 0) return null
+
+  const currentMonthIdx = today.getMonth()
+  const currentYear = today.getFullYear()
+  const startYear = currentMonthIdx >= feeMonthIndex ? currentYear : currentYear - 1
+
+  return {
+    start: new Date(startYear, feeMonthIndex, 1),
+    end: new Date(startYear + 1, feeMonthIndex, 1),
+    label: `${MONTH_NAMES[feeMonthIndex].slice(0, 3)} ${startYear} – ${MONTH_NAMES[feeMonthIndex].slice(0, 3)} ${startYear + 1}`,
+  }
+}
+
 export function getFeeWaiverInfo(card, today = new Date()) {
   if (!card || card.annual_fee_type !== 'paid') return null
   const feeMonth = card.fee_month || ''
   const currentMonth = MONTH_NAMES[today.getMonth()]
   const feeHitsThisMonth = feeMonth === currentMonth
   const waiver = Number(card.waiver_amount) || 0
-  const spent = Number(card.total_paid) || 0
+
+  const period = getAnniversaryPeriod(feeMonth, today)
+
+  // Compute spend for CURRENT anniversary year only from payment history.
+  // This auto-resets every year — no manual reset needed.
+  let spent = 0
+  if (period && card.payment_history?.length) {
+    spent = card.payment_history
+      .filter(p => {
+        const d = new Date(p.paid_at)
+        return !isNaN(d) && d >= period.start && d < period.end
+      })
+      .reduce((sum, p) => sum + (p.amount || 0), 0)
+  } else if (!period) {
+    // No fee_month set — fall back to total_paid as best effort
+    spent = Number(card.total_paid) || 0
+  }
+  // If period exists but no payment_history entries yet, spent is 0 (accurate)
+
   const remaining = Math.max(0, waiver - spent)
   const met = waiver > 0 && spent >= waiver
   const pct = waiver > 0 ? Math.min(100, Math.round((spent / waiver) * 100)) : 0
@@ -207,6 +251,7 @@ export function getFeeWaiverInfo(card, today = new Date()) {
     remaining,
     met,
     pct,
+    periodLabel: period?.label || '',
   }
 }
 
