@@ -1,23 +1,23 @@
 // ── Bank / Issuer Brand Config & Auto-Detection ─────────────────────────────
 
 export const BANK_LIST = [
-  { id: 'hdfc', name: 'HDFC', fullName: 'HDFC Bank', borderLeft: 'border-l-blue-600', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
-  { id: 'sbi', name: 'SBI', fullName: 'SBI Card', borderLeft: 'border-l-sky-600', badgeClass: 'bg-sky-50 text-sky-700 border-sky-200' },
-  { id: 'icici', name: 'ICICI', fullName: 'ICICI Bank', borderLeft: 'border-l-orange-500', badgeClass: 'bg-orange-50 text-orange-700 border-orange-200' },
-  { id: 'axis', name: 'Axis', fullName: 'Axis Bank', borderLeft: 'border-l-rose-700', badgeClass: 'bg-rose-50 text-rose-700 border-rose-200' },
-  { id: 'kotak', name: 'Kotak', fullName: 'Kotak Bank', borderLeft: 'border-l-red-600', badgeClass: 'bg-red-50 text-red-700 border-red-200' },
-  { id: 'amex', name: 'Amex', fullName: 'American Express', borderLeft: 'border-l-cyan-600', badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200' },
-  { id: 'idfc', name: 'IDFC', fullName: 'IDFC FIRST', borderLeft: 'border-l-amber-700', badgeClass: 'bg-amber-50 text-amber-800 border-amber-200' },
-  { id: 'indusind', name: 'IndusInd', fullName: 'IndusInd Bank', borderLeft: 'border-l-red-800', badgeClass: 'bg-red-50 text-red-800 border-red-200' },
-  { id: 'rbl', name: 'RBL', fullName: 'RBL Bank', borderLeft: 'border-l-indigo-600', badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-  { id: 'yes', name: 'YES Bank', fullName: 'YES Bank', borderLeft: 'border-l-blue-700', badgeClass: 'bg-blue-50 text-blue-800 border-blue-200' },
-  { id: 'bob', name: 'BOB', fullName: 'Bank of Baroda', borderLeft: 'border-l-amber-600', badgeClass: 'bg-amber-50 text-amber-700 border-amber-200' },
-  { id: 'au', name: 'AU Bank', fullName: 'AU Small Finance', borderLeft: 'border-l-purple-600', badgeClass: 'bg-purple-50 text-purple-700 border-purple-200' },
-  { id: 'federal', name: 'Federal', fullName: 'Federal Bank', borderLeft: 'border-l-blue-500', badgeClass: 'bg-blue-50 text-blue-600 border-blue-200' },
-  { id: 'scb', name: 'StanC', fullName: 'Standard Chartered', borderLeft: 'border-l-emerald-600', badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  { id: 'hsbc', name: 'HSBC', fullName: 'HSBC', borderLeft: 'border-l-red-700', badgeClass: 'bg-red-50 text-red-700 border-red-200' },
-  { id: 'onecard', name: 'OneCard', fullName: 'OneCard', borderLeft: 'border-l-slate-800', badgeClass: 'bg-slate-100 text-slate-800 border-slate-300' },
-  { id: 'scapia', name: 'Scapia', fullName: 'Scapia (Federal)', borderLeft: 'border-l-teal-600', badgeClass: 'bg-teal-50 text-teal-700 border-teal-200' },
+  { id: 'hdfc', name: 'HDFC', fullName: 'HDFC Bank', barColor: 'bg-blue-600', borderLeft: 'border-l-blue-600', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
+  { id: 'sbi', name: 'SBI', fullName: 'SBI Card', barColor: 'bg-sky-500', borderLeft: 'border-l-sky-500', badgeClass: 'bg-sky-50 text-sky-700 border-sky-200' },
+  { id: 'icici', name: 'ICICI', fullName: 'ICICI Bank', barColor: 'bg-orange-500', borderLeft: 'border-l-orange-500', badgeClass: 'bg-orange-50 text-orange-700 border-orange-200' },
+  { id: 'axis', name: 'Axis', fullName: 'Axis Bank', barColor: 'bg-rose-800', borderLeft: 'border-l-rose-800', badgeClass: 'bg-rose-50 text-rose-800 border-rose-200' },
+  { id: 'kotak', name: 'Kotak', fullName: 'Kotak Bank', barColor: 'bg-red-600', borderLeft: 'border-l-red-600', badgeClass: 'bg-red-50 text-red-700 border-red-200' },
+  { id: 'amex', name: 'Amex', fullName: 'American Express', barColor: 'bg-cyan-600', borderLeft: 'border-l-cyan-600', badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200' },
+  { id: 'idfc', name: 'IDFC', fullName: 'IDFC FIRST', barColor: 'bg-amber-700', borderLeft: 'border-l-amber-700', badgeClass: 'bg-amber-50 text-amber-800 border-amber-200' },
+  { id: 'indusind', name: 'IndusInd', fullName: 'IndusInd Bank', barColor: 'bg-red-800', borderLeft: 'border-l-red-800', badgeClass: 'bg-red-50 text-red-800 border-red-200' },
+  { id: 'rbl', name: 'RBL', fullName: 'RBL Bank', barColor: 'bg-indigo-600', borderLeft: 'border-l-indigo-600', badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+  { id: 'yes', name: 'YES Bank', fullName: 'YES Bank', barColor: 'bg-blue-700', borderLeft: 'border-l-blue-700', badgeClass: 'bg-blue-50 text-blue-800 border-blue-200' },
+  { id: 'bob', name: 'BOB', fullName: 'Bank of Baroda', barColor: 'bg-amber-600', borderLeft: 'border-l-amber-600', badgeClass: 'bg-amber-50 text-amber-700 border-amber-200' },
+  { id: 'au', name: 'AU Bank', fullName: 'AU Small Finance', barColor: 'bg-purple-600', borderLeft: 'border-l-purple-600', badgeClass: 'bg-purple-50 text-purple-700 border-purple-200' },
+  { id: 'federal', name: 'Federal', fullName: 'Federal Bank', barColor: 'bg-blue-500', borderLeft: 'border-l-blue-500', badgeClass: 'bg-blue-50 text-blue-600 border-blue-200' },
+  { id: 'scb', name: 'StanC', fullName: 'Standard Chartered', barColor: 'bg-emerald-600', borderLeft: 'border-l-emerald-600', badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  { id: 'hsbc', name: 'HSBC', fullName: 'HSBC', barColor: 'bg-red-700', borderLeft: 'border-l-red-700', badgeClass: 'bg-red-50 text-red-700 border-red-200' },
+  { id: 'onecard', name: 'OneCard', fullName: 'OneCard', barColor: 'bg-slate-900', borderLeft: 'border-l-slate-900', badgeClass: 'bg-slate-100 text-slate-800 border-slate-300' },
+  { id: 'scapia', name: 'Scapia', fullName: 'Scapia (Federal)', barColor: 'bg-teal-600', borderLeft: 'border-l-teal-600', badgeClass: 'bg-teal-50 text-teal-700 border-teal-200' },
 ]
 
 /**
@@ -53,4 +53,3 @@ export function getCardBank(card) {
 
   return null
 }
-
