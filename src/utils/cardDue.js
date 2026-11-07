@@ -223,11 +223,17 @@ export function getFeeWaiverInfo(card, today = new Date()) {
 
   const period = getAnniversaryPeriod(feeMonth, today)
 
+  // Ensure last_paid is counted in history if not yet migrated
+  let history = card.payment_history || []
+  if (card.last_paid_amount > 0 && card.last_paid_at && !history.some(p => p.paid_at === card.last_paid_at)) {
+    history = [...history, { amount: Number(card.last_paid_amount), paid_at: card.last_paid_at }]
+  }
+
   // Compute spend for CURRENT anniversary year only from payment history.
   // This auto-resets every year — no manual reset needed.
   let spent = 0
-  if (period && card.payment_history?.length) {
-    spent = card.payment_history
+  if (period && history.length) {
+    spent = history
       .filter(p => {
         const d = new Date(p.paid_at)
         return !isNaN(d) && d >= period.start && d < period.end
