@@ -41,6 +41,7 @@ import {
   normalizeMonthKey,
 } from '../utils/cardDue'
 import { getCardBank, BANK_LIST } from '../utils/bankBrands'
+import CustomTrackers from '../components/CustomTrackers'
 import Navbar from '../components/Navbar'
 
 const DASHBOARD_THEME_KEY = 'lpms_dashboard_dark'
@@ -63,6 +64,7 @@ export default function Dashboard({ session }) {
   const [cards, setCards] = useState([])
   const [subscriptions, setSubscriptions] = useState([])
   const [expenses, setExpenses] = useState([])
+  const [trackers, setTrackers] = useState([])
   const [loans, setLoans] = useState([])
   const [loanSort, setLoanSort] = useState('none')
   const [cardSort, setCardSort] = useState('none')
@@ -164,6 +166,7 @@ export default function Dashboard({ session }) {
         setCards(cardsData)
         setSubscriptions(subsData)
         setExpenses(expsData)
+        setTrackers(finData.custom_trackers || [])
 
         setBalance(s.available_balance || 0)
         setLoans(l)
@@ -768,6 +771,14 @@ export default function Dashboard({ session }) {
               ))}
           </div>
         </section>
+
+        {/* Custom Trackers Section */}
+        <CustomTrackers
+          session={session}
+          trackers={trackers}
+          onTrackersChange={setTrackers}
+          darkMode={darkMode}
+        />
 
       </div>
 
