@@ -223,12 +223,20 @@ export default function CustomTrackers({ session, trackers, onTrackersChange, da
 
   // Drag reorder entries
   const handleReorderEntries = async (trackerId, orderedEntryIds) => {
-    onTrackersChange((trackers || []).map(t => {
-      if (t.id !== trackerId) return t
-      const orderMap = Object.fromEntries(orderedEntryIds.map((id, i) => [id, i]))
-      const sorted = [...(t.entries || [])].sort((a, b) => (orderMap[a.id] ?? 0) - (orderMap[b.id] ?? 0))
-      return { ...t, entries: sorted }
-    }))
+    const orderMap = Object.fromEntries(orderedEntryIds.map((id, i) => [id, i]))
+    onTrackersChange(prev => {
+      const list = Array.isArray(prev) ? prev : (trackers || [])
+      return list.map(t => {
+        if (t.id !== trackerId) return t
+        const updatedEntries = (t.entries || [])
+          .map(e => ({
+            ...e,
+            sort_order: orderMap[e.id] != null ? orderMap[e.id] : (e.sort_order ?? 0),
+          }))
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        return { ...t, entries: updatedEntries }
+      })
+    })
     await executePersist(() => reorderTrackerEntries(session, trackerId, orderedEntryIds))
   }
 
@@ -409,7 +417,15 @@ function CategoryCard({
   )
 
   const entries = useMemo(() => {
-    return [...(tracker.entries || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    const seen = new Set()
+    const list = (tracker.entries || []).map(entry => {
+      if (!entry.id || seen.has(entry.id)) {
+        return { ...entry, id: crypto.randomUUID() }
+      }
+      seen.add(entry.id)
+      return entry
+    })
+    return list.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
   }, [tracker.entries])
 
   const columns = tracker.columns || []
@@ -502,8 +518,8 @@ function CategoryCard({
           <button
             onClick={onToggleTotal}
             className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors border ${tracker.show_total
-                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                : 'text-slate-400 border-slate-200 hover:bg-slate-50'
+              ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+              : 'text-slate-400 border-slate-200 hover:bg-slate-50'
               }`}
             title="Toggle category total"
           >
@@ -596,10 +612,10 @@ function CategoryCard({
               <div className="flex items-center gap-2">
                 <span
                   className={`text-base font-bold font-mono ${totalAmount > 0
-                      ? 'text-emerald-600'
-                      : totalAmount < 0
-                        ? 'text-rose-600'
-                        : 'text-slate-700'
+                    ? 'text-emerald-600'
+                    : totalAmount < 0
+                      ? 'text-rose-600'
+                      : 'text-slate-700'
                     }`}
                 >
                   {totalAmount > 0 ? '+ ' : totalAmount < 0 ? '- ' : ''}
@@ -608,8 +624,8 @@ function CategoryCard({
                 {totalAmount !== 0 && (
                   <span
                     className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${totalAmount > 0
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-rose-50 text-rose-700 border-rose-200'
                       }`}
                   >
                     {totalAmount > 0 ? 'Surplus / Receivable' : 'Deficit / Payable'}
@@ -1209,8 +1225,8 @@ function EntryModal({ tracker, entry, onClose, onSave }) {
                           handleValueChange(col.id, n > 0 ? String(n) : '')
                         }}
                         className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors uppercase tracking-widest ${(parseFloat(val) || 0) > 0
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'text-slate-400 border-slate-200 hover:bg-slate-50'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'text-slate-400 border-slate-200 hover:bg-slate-50'
                           }`}
                       >
                         + Positive (Income / Receivable)
@@ -1222,8 +1238,8 @@ function EntryModal({ tracker, entry, onClose, onSave }) {
                           handleValueChange(col.id, n > 0 ? String(-n) : '')
                         }}
                         className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors uppercase tracking-widest ${(parseFloat(val) || 0) < 0
-                            ? 'bg-rose-50 text-rose-700 border-rose-200'
-                            : 'text-slate-400 border-slate-200 hover:bg-slate-50'
+                          ? 'bg-rose-50 text-rose-700 border-rose-200'
+                          : 'text-slate-400 border-slate-200 hover:bg-slate-50'
                           }`}
                       >
                         - Negative (Expense / Payable)
