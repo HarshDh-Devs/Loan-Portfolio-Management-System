@@ -93,6 +93,22 @@ async function ensureLoaded(session) {
     _cache = getLocalData()
   }
 
+  // Deduplicate / repair duplicate entry IDs if any exist in storage
+  if (_cache && _cache.custom_trackers) {
+    for (const tracker of _cache.custom_trackers) {
+      const seenIds = new Set()
+      if (tracker.entries) {
+        tracker.entries = tracker.entries.map(entry => {
+          if (!entry.id || seenIds.has(entry.id)) {
+            return { ...entry, id: crypto.randomUUID() }
+          }
+          seenIds.add(entry.id)
+          return entry
+        })
+      }
+    }
+  }
+
   saveLocalData(_cache)
   return _cache
 }
@@ -147,7 +163,7 @@ export function loadAllFinanceData(session) {
       subscriptions: d.subscriptions || [],
       expenses: d.expenses || [],
       emis: d.emis || [],
-      custom_trackers: d.custom_trackers || [],
+      custom_trackers: JSON.parse(JSON.stringify(d.custom_trackers || [])),
       settings: d.settings || { available_balance: 0 },
     }
   })
@@ -413,14 +429,13 @@ export function addTrackerEntry(session, trackerId, entry) {
 
     const maxOrder = (tracker.entries || []).reduce((m, e) => Math.max(m, e.sort_order ?? -1), -1)
     const newEntry = {
-      id: crypto.randomUUID(),
-      sort_order: maxOrder + 1,
       values: entry.values || {},
       notes: entry.notes || [],
       created_at: new Date().toISOString(),
-      ...entry
+      ...entry,
+      id: crypto.randomUUID(),
+      sort_order: maxOrder + 1,
     }
-    if (!newEntry.id) newEntry.id = crypto.randomUUID()
 
     tracker.entries = [...(tracker.entries || []), newEntry]
     await persist(session, d)
