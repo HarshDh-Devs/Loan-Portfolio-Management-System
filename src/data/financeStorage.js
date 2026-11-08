@@ -9,6 +9,7 @@ function getDefaultData() {
     subscriptions: [],
     emis: [],
     expenses: [],
+    custom_trackers: [],
     settings: { available_balance: 0 },
   }
 }
@@ -146,6 +147,7 @@ export function loadAllFinanceData(session) {
       subscriptions: d.subscriptions || [],
       expenses: d.expenses || [],
       emis: d.emis || [],
+      custom_trackers: d.custom_trackers || [],
       settings: d.settings || { available_balance: 0 },
     }
   })
@@ -339,3 +341,128 @@ export function saveSettings(session, settings) {
     await persist(session, d)
   })
 }
+
+// ── Custom Trackers ──────────────────────────────────────────────────────────
+
+export function getCustomTrackers(session) {
+  return serialized(async () => {
+    const d = await ensureLoaded(session)
+    return d.custom_trackers || []
+  })
+}
+
+export function addCustomTracker(session, tracker) {
+  return serialized(async () => {
+    const d = await ensureLoaded(session)
+    const maxOrder = (d.custom_trackers || []).reduce((m, c) => Math.max(m, c.sort_order ?? -1), -1)
+    const newTracker = {
+      id: crypto.randomUUID(),
+      name: tracker.name || 'Untitled Tracker',
+      show_total: tracker.show_total ?? true,
+      is_collapsed: false,
+      sort_order: maxOrder + 1,
+      columns: tracker.columns || [
+        { id: crypto.randomUUID(), name: 'Date', type: 'date' },
+        { id: crypto.randomUUID(), name: 'Amount', type: 'amount' },
+        { id: crypto.randomUUID(), name: 'Description', type: 'text' }
+      ],
+      entries: tracker.entries || [],
+      ...tracker
+    }
+    if (!newTracker.id) newTracker.id = crypto.randomUUID()
+    d.custom_trackers = [...(d.custom_trackers || []), newTracker]
+    await persist(session, d)
+    return newTracker
+  })
+}
+
+export function updateCustomTracker(session, id, updates) {
+  return serialized(async () => {
+    const d = await ensureLoaded(session)
+    d.custom_trackers = (d.custom_trackers || []).map(t =>
+      t.id === id ? { ...t, ...updates } : t
+    )
+    await persist(session, d)
+  })
+}
+
+export function deleteCustomTracker(session, id) {
+  return serialized(async () => {
+    const d = await ensureLoaded(session)
+    d.custom_trackers = (d.custom_trackers || []).filter(t => t.id !== id)
+    await persist(session, d)
+  })
+}
+
+export function reorderCustomTrackers(session, orderedIds) {
+  return serialized(async () => {
+    const d = await ensureLoaded(session)
+    const orderMap = Object.fromEntries(orderedIds.map((id, i) => [id, i]))
+    d.custom_trackers = (d.custom_trackers || []).map(t =>
+      orderMap[t.id] == null ? t : { ...t, sort_order: orderMap[t.id] }
+    )
+    await persist(session, d)
+  })
+}
+
+export function addTrackerEntry(session, trackerId, entry) {
+  return serialized(async () => {
+    const d = await ensureLoaded(session)
+    const tracker = (d.custom_trackers || []).find(t => t.id === trackerId)
+    if (!tracker) return null
+
+    const maxOrder = (tracker.entries || []).reduce((m, e) => Math.max(m, e.sort_order ?? -1), -1)
+    const newEntry = {
+      id: crypto.randomUUID(),
+      sort_order: maxOrder + 1,
+      values: entry.values || {},
+      notes: entry.notes || [],
+      created_at: new Date().toISOString(),
+      ...entry
+    }
+    if (!newEntry.id) newEntry.id = crypto.randomUUID()
+
+    tracker.entries = [...(tracker.entries || []), newEntry]
+    await persist(session, d)
+    return newEntry
+  })
+}
+
+export function updateTrackerEntry(session, trackerId, entryId, updates) {
+  return serialized(async () => {
+    const d = await ensureLoaded(session)
+    const tracker = (d.custom_trackers || []).find(t => t.id === trackerId)
+    if (!tracker) return
+
+    tracker.entries = (tracker.entries || []).map(e =>
+      e.id === entryId ? { ...e, ...updates } : e
+    )
+    await persist(session, d)
+  })
+}
+
+export function deleteTrackerEntry(session, trackerId, entryId) {
+  return serialized(async () => {
+    const d = await ensureLoaded(session)
+    const tracker = (d.custom_trackers || []).find(t => t.id === trackerId)
+    if (!tracker) return
+
+    tracker.entries = (tracker.entries || []).filter(e => e.id !== entryId)
+    await persist(session, d)
+  })
+}
+
+export function reorderTrackerEntries(session, trackerId, orderedEntryIds) {
+  return serialized(async () => {
+    const d = await ensureLoaded(session)
+    const tracker = (d.custom_trackers || []).find(t => t.id === trackerId)
+    if (!tracker) return
+
+    const orderMap = Object.fromEntries(orderedEntryIds.map((id, i) => [id, i]))
+    tracker.entries = (tracker.entries || []).map(e =>
+      orderMap[e.id] == null ? e : { ...e, sort_order: orderMap[e.id] }
+    )
+    await persist(session, d)
+  })
+}
+
