@@ -162,13 +162,20 @@ export default function CustomTrackers({ session, trackers, onTrackersChange, da
       await executePersist(async () => {
         const created = await addTrackerEntry(session, trackerId, entryData)
         if (created) {
-          onTrackersChange((trackers || []).map(t => {
-            if (t.id !== trackerId) return t
-            return {
-              ...t,
-              entries: [...(t.entries || []), created],
-            }
-          }))
+          onTrackersChange(prev => {
+            const list = Array.isArray(prev) ? prev : (trackers || [])
+            return list.map(t => {
+              if (t.id !== trackerId) return t
+              const currentEntries = t.entries || []
+              if (currentEntries.some(e => e.id === created.id)) {
+                return t
+              }
+              return {
+                ...t,
+                entries: [...currentEntries, created],
+              }
+            })
+          })
         }
       })
     }
@@ -494,11 +501,10 @@ function CategoryCard({
 
           <button
             onClick={onToggleTotal}
-            className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors border ${
-              tracker.show_total
+            className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors border ${tracker.show_total
                 ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                 : 'text-slate-400 border-slate-200 hover:bg-slate-50'
-            }`}
+              }`}
             title="Toggle category total"
           >
             {tracker.show_total ? 'Total: ON' : 'Total: OFF'}
@@ -589,24 +595,22 @@ function CategoryCard({
               </span>
               <div className="flex items-center gap-2">
                 <span
-                  className={`text-base font-bold font-mono ${
-                    totalAmount > 0
+                  className={`text-base font-bold font-mono ${totalAmount > 0
                       ? 'text-emerald-600'
                       : totalAmount < 0
-                      ? 'text-rose-600'
-                      : 'text-slate-700'
-                  }`}
+                        ? 'text-rose-600'
+                        : 'text-slate-700'
+                    }`}
                 >
                   {totalAmount > 0 ? '+ ' : totalAmount < 0 ? '- ' : ''}
                   {formatINR(Math.abs(totalAmount))}
                 </span>
                 {totalAmount !== 0 && (
                   <span
-                    className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${
-                      totalAmount > 0
+                    className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${totalAmount > 0
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                         : 'bg-rose-50 text-rose-700 border-rose-200'
-                    }`}
+                      }`}
                   >
                     {totalAmount > 0 ? 'Surplus / Receivable' : 'Deficit / Payable'}
                   </span>
@@ -770,9 +774,8 @@ function CellDisplay({ type, value }) {
     const num = parseFloat(value) || 0
     return (
       <span
-        className={`font-semibold font-mono text-xs ${
-          num > 0 ? 'text-emerald-600' : num < 0 ? 'text-rose-600' : 'text-slate-700'
-        }`}
+        className={`font-semibold font-mono text-xs ${num > 0 ? 'text-emerald-600' : num < 0 ? 'text-rose-600' : 'text-slate-700'
+          }`}
       >
         {num > 0 ? '+ ' : num < 0 ? '- ' : ''}
         {formatINR(Math.abs(num))}
@@ -981,8 +984,7 @@ function ManageColumnsModal({ tracker, onClose, onSaveColumns }) {
 
     if (entriesWithData > 0) {
       const confirmDelete = window.confirm(
-        `Column "${colToDelete.name}" has data in ${entriesWithData} recorded ${
-          entriesWithData === 1 ? 'entry' : 'entries'
+        `Column "${colToDelete.name}" has data in ${entriesWithData} recorded ${entriesWithData === 1 ? 'entry' : 'entries'
         }. Deleting it will remove that data. Are you sure you want to proceed?`
       )
       if (!confirmDelete) return
@@ -1130,6 +1132,7 @@ function ManageColumnsModal({ tracker, onClose, onSaveColumns }) {
 function EntryModal({ tracker, entry, onClose, onSave }) {
   const isEdit = Boolean(entry)
   const columns = tracker.columns || []
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const [values, setValues] = useState(() => {
     return { ...(entry?.values || {}) }
@@ -1157,6 +1160,8 @@ function EntryModal({ tracker, entry, onClose, onSave }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
+    if (isSubmitting) return
+    setIsSubmitting(true)
     onSave({
       values,
       notes,
@@ -1203,11 +1208,10 @@ function EntryModal({ tracker, entry, onClose, onSave }) {
                           const n = Math.abs(parseFloat(val) || 0)
                           handleValueChange(col.id, n > 0 ? String(n) : '')
                         }}
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors uppercase tracking-widest ${
-                          (parseFloat(val) || 0) > 0
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors uppercase tracking-widest ${(parseFloat(val) || 0) > 0
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                             : 'text-slate-400 border-slate-200 hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         + Positive (Income / Receivable)
                       </button>
@@ -1217,11 +1221,10 @@ function EntryModal({ tracker, entry, onClose, onSave }) {
                           const n = Math.abs(parseFloat(val) || 0)
                           handleValueChange(col.id, n > 0 ? String(-n) : '')
                         }}
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors uppercase tracking-widest ${
-                          (parseFloat(val) || 0) < 0
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors uppercase tracking-widest ${(parseFloat(val) || 0) < 0
                             ? 'bg-rose-50 text-rose-700 border-rose-200'
                             : 'text-slate-400 border-slate-200 hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         - Negative (Expense / Payable)
                       </button>
@@ -1301,9 +1304,10 @@ function EntryModal({ tracker, entry, onClose, onSave }) {
 
           <button
             type="submit"
-            className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 transition-colors mt-6 text-xs uppercase tracking-widest"
+            disabled={isSubmitting}
+            className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 transition-colors mt-6 text-xs uppercase tracking-widest disabled:opacity-50"
           >
-            {isEdit ? 'Save Changes' : 'Add Entry'}
+            {isSubmitting ? 'Saving...' : isEdit ? 'Save Changes' : 'Add Entry'}
           </button>
         </form>
       </div>
