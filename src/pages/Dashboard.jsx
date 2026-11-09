@@ -19,29 +19,30 @@ import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import { getLoans } from '../data/hybridStorage'
 import { getCurrentLoanState } from '../math/engine'
 import {
-  loadAllFinanceData, saveSettings,
-  addCard, updateCard, deleteCard, reorderCards, patchFinanceData,
-  addSubscription, updateSubscription, deleteSubscription,
-  addExpense, updateExpense, deleteExpense
+  loadAllFinanceData, refreshFinanceData, onFinanceDataChanged, saveSettings, updateItemWith,
+  addCard, deleteCard, reorderCards, patchFinanceData,
+  addSubscription, deleteSubscription,
+  addExpense, deleteExpense
 } from '../data/financeStorage'
+import { billCycleFor, toggleSettledUpdates, removePaymentUpdates } from '../utils/payments'
 import { formatINR, formatDateTime } from '../utils/format'
 import {
   CARD_STATUS,
   MONTH_NAMES,
   cardRowClass,
   compareUpcomingDue,
+  daysBetween,
   ensureCardSortOrder,
   formatDueCaption,
   getCardDueInfo,
   getFeeWaiverInfo,
-  getUpcomingDueCycleKey,
   getUpcomingDueDate,
   monthKey,
-  nextCardCycleUpdates,
   normalizeMonthKey,
 } from '../utils/cardDue'
 import { getCardBank, BANK_LIST } from '../utils/bankBrands'
 import CustomTrackers from '../components/CustomTrackers'
+import { PencilIcon, TrashIcon, ChevronDownIcon, ChevronRightIcon, GripIcon, iconButton } from '../components/icons'
 import Navbar from '../components/Navbar'
 
 const DASHBOARD_THEME_KEY = 'lpms_dashboard_dark'
@@ -54,10 +55,63 @@ function readDashboardDark() {
   }
 }
 
+const COLLECTION = { card: 'cards', subscription: 'subscriptions', expense: 'expenses' }
+
+/**
+ * Start-of-session upkeep, applied to the latest saved data. Idempotent:
+ * running it twice (or on two devices) changes nothing the second time.
+ *  - Monthly rollover: subscriptions/expenses add their amount to total paid
+ *    once per calendar month.
+ *  - Backfill: a card's "last paid" record is added to its payment history.
+ *  - Every card gets a sort order.
+ * Returns true if anything changed.
+ */
+function applyMaintenance(d, now = new Date()) {
+  let changed = false
+  const currentMonth = monthKey(now)
+  const settings = d.settings || {}
+  const lastReset = normalizeMonthKey(settings.last_reset_month)
+
+  if (lastReset && lastReset !== currentMonth) {
+    const rollover = item => ({ ...item, total_paid: (Number(item.total_paid) || 0) + (Number(item.amount) || 0) })
+    d.subscriptions = (d.subscriptions || []).map(rollover)
+    d.expenses = (d.expenses || []).map(rollover)
+    changed = true
+  }
+  if (lastReset !== currentMonth) {
+    d.settings = { ...settings, last_reset_month: currentMonth }
+    changed = true
+  }
+
+  d.cards = (d.cards || []).map(card => {
+    if (card.last_paid_amount > 0 && card.last_paid_at) {
+      const hist = card.payment_history || []
+      if (!hist.some(p => p.paid_at === card.last_paid_at)) {
+        changed = true
+        return {
+          ...card,
+          payment_history: [
+            ...hist,
+            { id: crypto.randomUUID(), amount: Number(card.last_paid_amount), paid_at: card.last_paid_at },
+          ],
+        }
+      }
+    }
+    return card
+  })
+
+  const ordered = ensureCardSortOrder(d.cards)
+  d.cards = ordered.cards
+  if (ordered.changed) changed = true
+
+  return changed
+}
+
 export default function Dashboard({ session }) {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [balance, setBalance] = useState(0)
+  const [saveError, setSaveError] = useState(null)
   const [isEditingBalance, setIsEditingBalance] = useState(false)
   const [balanceInput, setBalanceInput] = useState('')
 
@@ -97,78 +151,31 @@ export default function Dashboard({ session }) {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   )
 
+  // Replace everything on screen with a saved snapshot.
+  const applySnapshot = (d) => {
+    setCards(d.cards || [])
+    setSubscriptions(d.subscriptions || [])
+    setExpenses(d.expenses || [])
+    setTrackers(d.custom_trackers || [])
+    setBalance(d.settings?.available_balance || 0)
+  }
+
   useEffect(() => {
     async function loadData() {
       try {
-        // Single load — reads the blob once instead of 4 separate reads
-        const [finData, l] = await Promise.all([
+        const [loaded, l] = await Promise.all([
           loadAllFinanceData(session),
           getLoans(session)
         ])
 
-        const { settings: s } = finData
-        let { cards: cardsData, subscriptions: subsData, expenses: expsData } = finData
-
-        const now = new Date()
-        const currentMonthKey = monthKey(now)
-        const lastReset = normalizeMonthKey(s.last_reset_month)
-        const monthChanged = Boolean(lastReset && lastReset !== currentMonthKey)
-
-        let cardsChanged = false
-
-        // Calendar-month rollover is only for subscriptions/expenses.
-        // Credit card bills follow each card's due day, not the 1st.
-        if (monthChanged) {
-          subsData = subsData.map(item => ({
-            ...item,
-            total_paid: (item.total_paid || 0) + (item.amount || 0)
-          }))
-          expsData = expsData.map(item => ({
-            ...item,
-            total_paid: (item.total_paid || 0) + (item.amount || 0)
-          }))
+        // Monthly rollover + data repairs run inside the storage layer against the
+        // latest saved data, and are idempotent (safe if two devices open at once).
+        let finData = loaded
+        if (applyMaintenance(structuredClone(loaded))) {
+          finData = await patchFinanceData(session, (d) => { applyMaintenance(d) })
         }
 
-        // Auto-reset disabled — user manually controls paid/unpaid status
-
-        // Backfill payment_history from last_paid for existing cards if not already recorded
-        cardsData = cardsData.map(card => {
-          if (card.last_paid_amount > 0 && card.last_paid_at) {
-            const hist = card.payment_history || []
-            const exists = hist.some(p => p.paid_at === card.last_paid_at)
-            if (!exists) {
-              cardsChanged = true
-              return {
-                ...card,
-                payment_history: [
-                  ...hist,
-                  { amount: Number(card.last_paid_amount), paid_at: card.last_paid_at }
-                ]
-              }
-            }
-          }
-          return card
-        })
-
-        const ordered = ensureCardSortOrder(cardsData)
-        cardsData = ordered.cards
-        if (ordered.changed) cardsChanged = true
-
-        if (monthChanged || !lastReset || cardsChanged) {
-          await patchFinanceData(session, (d) => {
-            d.cards = cardsData
-            d.subscriptions = subsData
-            d.expenses = expsData
-            d.settings = { ...(d.settings || {}), ...s, last_reset_month: currentMonthKey }
-          })
-        }
-
-        setCards(cardsData)
-        setSubscriptions(subsData)
-        setExpenses(expsData)
-        setTrackers(finData.custom_trackers || [])
-
-        setBalance(s.available_balance || 0)
+        applySnapshot(finData)
         setLoans(l)
       } catch (err) {
         console.error('Failed to load dashboard data:', err)
@@ -177,6 +184,23 @@ export default function Dashboard({ session }) {
       }
     }
     loadData()
+  }, [session])
+
+  // Keep this tab in sync with changes saved from another tab or device.
+  useEffect(() => {
+    const unsubscribe = onFinanceDataChanged(applySnapshot)
+    const refresh = () => {
+      if (document.visibilityState === 'visible') {
+        refreshFinanceData(session).catch(err => console.warn('Refresh failed:', err))
+      }
+    }
+    document.addEventListener('visibilitychange', refresh)
+    window.addEventListener('focus', refresh)
+    return () => {
+      unsubscribe()
+      document.removeEventListener('visibilitychange', refresh)
+      window.removeEventListener('focus', refresh)
+    }
   }, [session])
 
   const totalBills = [
@@ -212,6 +236,32 @@ export default function Dashboard({ session }) {
     setActiveCardId(event.active.id)
   }
 
+  // Run a save. On failure: show the error and re-sync the screen with what is
+  // actually saved (nothing is half-applied; see financeStorage `mutate`).
+  const guardedSave = async (fn) => {
+    setSaveError(null)
+    try {
+      return await fn()
+    } catch (err) {
+      console.error('Save failed:', err)
+      setSaveError(err?.message || 'Network error')
+      try {
+        applySnapshot(await refreshFinanceData(session))
+      } catch {
+        // Offline: the screen already shows the last saved values.
+      }
+      return undefined
+    }
+  }
+
+  // Change one item based on its LATEST saved value, then show the saved item.
+  const saveItem = (type, id, fn) => guardedSave(async () => {
+    const saved = await updateItemWith(session, COLLECTION[type], id, fn)
+    const setList = { card: setCards, subscription: setSubscriptions, expense: setExpenses }[type]
+    setList(prev => saved ? prev.map(x => (x.id === id ? saved : x)) : prev.filter(x => x.id !== id))
+    return saved
+  })
+
   const handleCardDragEnd = async (event) => {
     const { active, over } = event
     setActiveCardId(null)
@@ -222,143 +272,76 @@ export default function Dashboard({ session }) {
     if (oldIndex < 0 || newIndex < 0) return
     const reordered = arrayMove(sortedCards, oldIndex, newIndex).map((c, i) => ({ ...c, sort_order: i }))
     setCards(reordered)
-    await reorderCards(session, reordered.map(c => c.id))
+    await guardedSave(() => reorderCards(session, reordered.map(c => c.id)))
   }
 
   const handleSaveEditedCard = async (data) => {
     if (!editingCard) return
-    const updates = { ...data }
-    if (updates.due_date) updates.bill_cycle = getUpcomingDueCycleKey(updates.due_date)
-    await updateCard(session, editingCard.id, updates)
-    setCards(prev => prev.map(c => c.id === editingCard.id ? { ...c, ...updates } : c))
-    setEditingCard(null)
+    const saved = await saveItem('card', editingCard.id, (current) => {
+      const updates = { ...data }
+      if ('due_date' in updates) updates.bill_cycle = billCycleFor(current, updates.due_date)
+      return updates
+    })
+    if (saved !== undefined) setEditingCard(null)
   }
 
   const handleSaveBalance = async () => {
     const newBalance = parseFloat(balanceInput) || 0
-    await saveSettings(session, { available_balance: newBalance })
-    setBalance(newBalance)
-    setIsEditingBalance(false)
+    await guardedSave(async () => {
+      await saveSettings(session, { available_balance: newBalance })
+      setBalance(newBalance)
+      setIsEditingBalance(false)
+    })
   }
 
-  const togglePaid = async (type, item) => {
-    const isPaid = !item.paid
-    const updates = { paid: isPaid }
+  // `billOverride`: a bill typed on screen but not yet saved, paid as-is.
+  const togglePaid = (type, item, billOverride) =>
+    saveItem(type, item.id, (current) => toggleSettledUpdates(current, type, billOverride))
 
-    if (isPaid) {
-      const paidAmt = type === 'card' ? (item.bill_amount || 0) : (item.amount || 0)
-      updates.total_paid = (item.total_paid || 0) + paidAmt
-      if (type === 'card') {
-        updates.last_paid_amount = paidAmt
-        updates.last_paid_at = new Date().toISOString()
-        // Record in payment history (only if amount > 0)
-        if (paidAmt > 0) {
-          updates.payment_history = [
-            ...(item.payment_history || []),
-            { amount: paidAmt, paid_at: new Date().toISOString() }
-          ]
-        }
-        updates.bill_amount = 0
-        updates.settled_cycle = item.bill_cycle || getUpcomingDueCycleKey(item.due_date)
-      } else {
-        updates.amount = 0
-      }
-    }
-    // When un-settling (paid -> false), payment_history and total_paid remain permanently preserved!
-
-    if (type === 'card') {
-      await updateCard(session, item.id, updates)
-      setCards(prev => prev.map(c => c.id === item.id ? { ...c, ...updates } : c))
-    } else if (type === 'subscription') {
-      await updateSubscription(session, item.id, updates)
-      setSubscriptions(prev => prev.map(s => s.id === item.id ? { ...s, ...updates } : s))
-    } else if (type === 'expense') {
-      await updateExpense(session, item.id, updates)
-      setExpenses(prev => prev.map(e => e.id === item.id ? { ...e, ...updates } : e))
-    }
-  }
-
-  const handleDeletePayment = async (cardId, paymentToDelete) => {
-    if (!window.confirm(`Delete this payment of ₹${(paymentToDelete.amount || 0).toLocaleString('en-IN')}?`)) return
-    const card = cards.find(c => c.id === cardId)
-    if (!card) return
-
-    const newHistory = (card.payment_history || []).filter(p => p !== paymentToDelete && p.paid_at !== paymentToDelete.paid_at)
-    const updates = {
-      payment_history: newHistory,
-      total_paid: Math.max(0, (card.total_paid || 0) - (paymentToDelete.amount || 0))
-    }
-    await updateCard(session, cardId, updates)
-    setCards(prev => prev.map(c => c.id === cardId ? { ...c, ...updates } : c))
+  const handleDeletePayment = async (cardId, payment) => {
+    if (!window.confirm(`Delete this payment of ₹${(payment.amount || 0).toLocaleString('en-IN')}?`)) return
+    await saveItem('card', cardId, (current) => removePaymentUpdates(current, payment))
   }
 
   const handleDelete = async (type, id) => {
     if (!window.confirm('Delete this item?')) return
-    if (type === 'card') {
-      await deleteCard(session, id)
-      setCards(prev => prev.filter(c => c.id !== id))
-    } else if (type === 'subscription') {
-      await deleteSubscription(session, id)
-      setSubscriptions(prev => prev.filter(s => s.id !== id))
-    } else if (type === 'expense') {
-      await deleteExpense(session, id)
-      setExpenses(prev => prev.filter(e => e.id !== id))
-    }
+    await guardedSave(async () => {
+      if (type === 'card') {
+        await deleteCard(session, id)
+        setCards(prev => prev.filter(c => c.id !== id))
+      } else if (type === 'subscription') {
+        await deleteSubscription(session, id)
+        setSubscriptions(prev => prev.filter(s => s.id !== id))
+      } else if (type === 'expense') {
+        await deleteExpense(session, id)
+        setExpenses(prev => prev.filter(e => e.id !== id))
+      }
+    })
   }
 
-  const updateBillAmount = async (id, val) => {
-    const amount = parseFloat(val) || 0
-    const card = cards.find(c => c.id === id)
-    const updates = { bill_amount: amount }
-    if (card?.due_date) updates.bill_cycle = getUpcomingDueCycleKey(card.due_date)
-    await updateCard(session, id, updates)
-    setCards(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
-  }
+  const updateBillAmount = (id, val) =>
+    saveItem('card', id, (current) => ({
+      bill_amount: parseFloat(val) || 0,
+      // Correcting an overdue bill keeps it in its original (overdue) cycle.
+      bill_cycle: billCycleFor(current),
+    }))
 
-  const updateTotalPaid = async (type, id, val) => {
-    const amount = parseFloat(val) || 0
-    const updates = { total_paid: amount }
-    if (type === 'card') {
-      await updateCard(session, id, updates)
-      setCards(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
-    } else if (type === 'subscription') {
-      await updateSubscription(session, id, updates)
-      setSubscriptions(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s))
-    } else if (type === 'expense') {
-      await updateExpense(session, id, updates)
-      setExpenses(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e))
-    }
-  }
+  const updateTotalPaid = (type, id, val, since) =>
+    saveItem(type, id, () => ({
+      total_paid: parseFloat(val) || 0,
+      ...(since !== undefined ? { total_paid_since: since || null } : {}),
+    }))
 
-  const updateDueDate = async (type, id, val) => {
-    const day = parseInt(val) || null
-    const updates = { due_date: day }
-    if (type === 'card') {
-      if (day) updates.bill_cycle = getUpcomingDueCycleKey(day)
-      await updateCard(session, id, updates)
-      setCards(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
-    } else if (type === 'subscription') {
-      await updateSubscription(session, id, updates)
-      setSubscriptions(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s))
-    } else if (type === 'expense') {
-      await updateExpense(session, id, updates)
-      setExpenses(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e))
-    }
-  }
+  const updateDueDate = (type, id, val) =>
+    saveItem(type, id, (current) => {
+      const parsed = parseInt(val, 10)
+      const day = parsed >= 1 && parsed <= 31 ? parsed : null
+      const updates = { due_date: day }
+      if (type === 'card') updates.bill_cycle = billCycleFor(current, day)
+      return updates
+    })
 
-  const updateNotes = async (type, id, val) => {
-    const updates = { notes: val }
-    if (type === 'card') {
-      await updateCard(session, id, updates)
-      setCards(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
-    } else if (type === 'subscription') {
-      await updateSubscription(session, id, updates)
-      setSubscriptions(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s))
-    } else if (type === 'expense') {
-      await updateExpense(session, id, updates)
-      setExpenses(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e))
-    }
-  }
+  const updateNotes = (type, id, val) => saveItem(type, id, () => ({ notes: val }))
 
   if (loading) {
     return (
@@ -374,6 +357,27 @@ export default function Dashboard({ session }) {
   return (
     <div className={`dashboard-shell min-h-screen pb-20 ${darkMode ? 'dashboard-shell--dark' : 'bg-gray-50'}`}>
       <Navbar session={session} activePage="Dashboard" darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />
+
+      {saveError && (
+        <div
+          role="alert"
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] w-[calc(100%-2rem)] max-w-md flex items-start gap-3 px-4 py-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 shadow-lg"
+        >
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold">Couldn&apos;t save your change</p>
+            <p className="text-xs mt-0.5 break-words">
+              {saveError}. Nothing was changed. The screen shows your last saved data, so you can try again.
+            </p>
+          </div>
+          <button
+            onClick={() => setSaveError(null)}
+            className="shrink-0 w-6 h-6 inline-flex items-center justify-center rounded-md hover:bg-rose-100"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Summary Bar */}
       <div className="max-w-[1400px] mx-auto px-6 py-8">
@@ -541,10 +545,10 @@ export default function Dashboard({ session }) {
                       key={card.id}
                       card={card}
                       disabled={!canDragCards}
-                      onTogglePaid={() => togglePaid('card', card)}
+                      onTogglePaid={(bill) => togglePaid('card', card, bill)}
                       onDelete={() => handleDelete('card', card.id)}
                       onUpdateBill={(val) => updateBillAmount(card.id, val)}
-                      onUpdateTotalPaid={(val) => updateTotalPaid('card', card.id, val)}
+                      onUpdateTotalPaid={(val, since) => updateTotalPaid('card', card.id, val, since)}
                       onUpdateNotes={(val) => updateNotes('card', card.id, val)}
                       onUpdateDueDate={(val) => updateDueDate('card', card.id, val)}
                       onEdit={() => setEditingCard(card)}
@@ -554,7 +558,7 @@ export default function Dashboard({ session }) {
                 </SortableContext>
                 <DragOverlay dropAnimation={{ duration: 220, easing: 'cubic-bezier(0.2, 0, 0, 1)' }}>
                   {activeCard ? (
-                    <div className={`w-[min(920px,92vw)] shadow-2xl rounded-xl scale-[1.015] ring-1 ring-indigo-200 pointer-events-none ${darkMode ? 'dashboard-shell dashboard-shell--dark' : ''}`}>
+                    <div className={`w-full shadow-2xl rounded-xl scale-[1.015] ring-1 ring-indigo-200 pointer-events-none ${darkMode ? 'dashboard-shell dashboard-shell--dark' : ''}`}>
                       <ItemCard
                         item={activeCard}
                         type="card"
@@ -627,48 +631,66 @@ export default function Dashboard({ session }) {
               })
               .map(loan => {
                 const state = loan.state
+                const nextEmi = state.nextEmiDate ? new Date(state.nextEmiDate) : null
+                const termPct = loan.tenureMonths ? Math.min(100, Math.round((state.emisPaid / loan.tenureMonths) * 100)) : 0
+                const isCcEmi = loan.type === 'Credit Card'
                 return (
-                  <div key={loan.id} className="bg-white border border-gray-200 rounded-xl py-3 px-6 flex items-center gap-6 lg:gap-10 transition-all">
-                    <div className="flex flex-col w-[220px] min-w-[180px] shrink-0">
-                      <span className="text-sm font-medium text-gray-900 truncate">{loan.nickname}</span>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Loan Profile</span>
-                        {loan.type === 'Credit Card' && (
+                  <div key={loan.id} className={`bg-white border border-gray-200 rounded-xl py-3 pl-4 pr-4 sm:pl-5 sm:pr-5 flex flex-wrap lg:flex-nowrap items-center gap-3 lg:gap-6 transition-all ${ROW_GRID}`}>
+                    {/* Empty handle slot so loan columns line up with the card list */}
+                    <span className="hidden xl:block" aria-hidden />
+
+                    <div className="flex flex-col w-[200px] shrink-0 xl:w-auto xl:min-w-0">
+                      <span className="text-sm font-semibold text-gray-900 truncate" title={loan.nickname}>{loan.nickname}</span>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        {isCcEmi ? (
                           <span
-                            className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full uppercase tracking-widest shrink-0"
+                            className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-px rounded-full shrink-0"
                             title="Billed directly inside your credit card statement; not counted twice in total bills"
                           >
                             Billed in CC
                           </span>
+                        ) : (
+                          <span className="text-xs font-medium text-slate-400">{loan.type ? `${loan.type} loan` : 'Loan'}</span>
                         )}
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-4 sm:gap-8 text-sm text-gray-500 shrink-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[65px]">Next Due</span>
-                        <span className="text-gray-700 font-medium">{getOrdinal(new Date(state.nextEmiDate).getDate())}</span>
-                      </div>
+                    <Stat label="Next due" className="min-w-[170px] xl:min-w-0">
+                      <DueValue
+                        caption={nextEmi && !isNaN(nextEmi) ? formatDueCaption(nextEmi) : '—'}
+                        tone={dueUrgencyTone(nextEmi && !isNaN(nextEmi) ? nextEmi : null)}
+                      />
+                    </Stat>
 
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[65px]">EMI Amt</span>
-                        <span className="font-semibold text-gray-900">
-                          {formatINR(Math.round(loan.emiAmount || 0))}
+                    <Stat label="EMI" className="min-w-[110px] xl:min-w-0">
+                      {(loan.emiAmount || 0) > 0 ? (
+                        <span className="font-semibold text-gray-900 tabular-nums">{formatINR(Math.round(loan.emiAmount))}</span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </Stat>
+
+                    <Stat label="Term" className="min-w-[160px] xl:min-w-0 xl:col-span-2">
+                      <span className="flex items-center gap-2.5">
+                        <span className="h-1.5 flex-1 max-w-[180px] rounded-full bg-slate-100 overflow-hidden">
+                          <span
+                            className={`block h-full rounded-full ${termPct >= 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+                            style={{ width: `${termPct}%` }}
+                          />
                         </span>
-                      </div>
+                        <span className="text-xs font-semibold text-gray-700 tabular-nums whitespace-nowrap">
+                          {state.emisPaid}/{loan.tenureMonths}
+                        </span>
+                      </span>
+                    </Stat>
 
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400 uppercase tracking-wide min-w-[40px]">Term</span>
-                        <span className="text-green-600 font-semibold">{state.emisPaid}/{loan.tenureMonths}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex-1 flex items-center gap-4 justify-end">
+                    <div className="flex-1 xl:flex-none flex items-center justify-end">
                       <button
                         onClick={() => navigate('/loans')}
-                        className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 uppercase tracking-widest transition-colors whitespace-nowrap"
+                        className="h-8 px-3 inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
                       >
-                        Manage in Loans
+                        Manage
+                        <ChevronRightIcon />
                       </button>
                     </div>
                   </div>
@@ -716,9 +738,9 @@ export default function Dashboard({ session }) {
                   key={sub.id}
                   item={sub}
                   type="subscription"
-                  onTogglePaid={() => togglePaid('subscription', sub)}
+                  onTogglePaid={(bill) => togglePaid('subscription', sub, bill)}
                   onDelete={() => handleDelete('subscription', sub.id)}
-                  onUpdateTotalPaid={(val) => updateTotalPaid('subscription', sub.id, val)}
+                  onUpdateTotalPaid={(val, since) => updateTotalPaid('subscription', sub.id, val, since)}
                   onUpdateNotes={(val) => updateNotes('subscription', sub.id, val)}
                   onUpdateDueDate={(val) => updateDueDate('subscription', sub.id, val)}
                 />
@@ -762,9 +784,9 @@ export default function Dashboard({ session }) {
                   key={exp.id}
                   item={exp}
                   type="expense"
-                  onTogglePaid={() => togglePaid('expense', exp)}
+                  onTogglePaid={(bill) => togglePaid('expense', exp, bill)}
                   onDelete={() => handleDelete('expense', exp.id)}
-                  onUpdateTotalPaid={(val) => updateTotalPaid('expense', exp.id, val)}
+                  onUpdateTotalPaid={(val, since) => updateTotalPaid('expense', exp.id, val, since)}
                   onUpdateNotes={(val) => updateNotes('expense', exp.id, val)}
                   onUpdateDueDate={(val) => updateDueDate('expense', exp.id, val)}
                 />
@@ -787,7 +809,7 @@ export default function Dashboard({ session }) {
         <AddModal
           type={showModal}
           onClose={() => setShowModal(null)}
-          onAdd={async (data) => {
+          onAdd={(data) => guardedSave(async () => {
             if (showModal === 'card') {
               const res = await addCard(session, data)
               setCards(prev => [...prev, res])
@@ -799,7 +821,7 @@ export default function Dashboard({ session }) {
               setExpenses(prev => [...prev, res])
             }
             setShowModal(null)
-          }}
+          })}
         />
       )}
       {editingCard && (
@@ -1075,6 +1097,54 @@ function SortableItemCard({ card, disabled, ...itemProps }) {
   )
 }
 
+// Shared column grid for card, subscription, expense and loan rows (xl and up), so
+// every list on the dashboard lines up. Below xl the rows fall back to wrapping flex.
+// Columns: handle | name | due | amount | waiver | utilization | actions.
+// Sized to fit the 1152px (max-w-6xl) section width.
+// The actions column is fixed width so optional buttons (Save) never shift the others.
+const ROW_GRID =
+  'xl:grid xl:grid-cols-[32px_minmax(150px,1.5fr)_minmax(156px,1.1fr)_minmax(100px,0.8fr)_minmax(120px,0.9fr)_minmax(100px,0.7fr)_308px] xl:gap-x-4'
+
+// "2026-09" → "Sep 2026"
+function formatMonthKey(key) {
+  const [y, m] = String(key).split('-').map(Number)
+  if (!y || !m) return String(key)
+  return new Date(y, m - 1, 1).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+}
+
+// Stacked label-over-value cell used by every row column.
+function Stat({ label, children, display = 'flex', className = '' }) {
+  return (
+    <div className={`${display} flex-col min-w-0 ${className}`}>
+      <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider leading-4">{label}</span>
+      <div className="mt-0.5 text-sm leading-5 min-w-0">{children}</div>
+    </div>
+  )
+}
+
+// Color for the relative part of a due date: red overdue, amber today, orange within 3 days.
+function dueUrgencyTone(date, status) {
+  if (status === 'settled') return 'text-gray-400'
+  if (status === 'overdue') return 'text-rose-600'
+  if (!date) return 'text-gray-400'
+  const days = daysBetween(new Date(), date)
+  if (days < 0) return 'text-rose-600'
+  if (days === 0) return 'text-amber-600'
+  if (days <= 3) return 'text-orange-600'
+  return 'text-gray-400'
+}
+
+// "7 Dec · in 28 days" → bold date + colored relative part.
+function DueValue({ caption, tone }) {
+  const [date, rel] = String(caption || '—').split(' · ')
+  return (
+    <span className="flex items-baseline gap-1.5 min-w-0 whitespace-nowrap">
+      <span className={`shrink-0 font-semibold ${rel ? 'text-gray-900' : 'text-gray-400 font-normal'}`}>{date}</span>
+      {rel && <span className={`truncate text-xs font-medium ${tone}`} title={rel}>{rel}</span>}
+    </span>
+  )
+}
+
 function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTotalPaid, onUpdateNotes, onUpdateDueDate, onEdit, onDeletePayment, dragHandle, isOverlay }) {
   const [showDetails, setShowDetails] = useState(false)
   const [isEditingTotalPaid, setIsEditingTotalPaid] = useState(false)
@@ -1086,6 +1156,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
   // Local state for the inputs to prevent typing lag
   const [localAmount, setLocalAmount] = useState(amount || '')
   const [localTotalPaid, setLocalTotalPaid] = useState(item.total_paid || 0)
+  const [localSince, setLocalSince] = useState(item.total_paid_since || '')
   const [localNotes, setLocalNotes] = useState(item.notes || '')
   const [localDueDate, setLocalDueDate] = useState(item.due_date || '')
   const dueInfo = type === 'card' ? getCardDueInfo(item) : null
@@ -1118,9 +1189,10 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
   useEffect(() => {
     setLocalAmount(amount || '')
     setLocalTotalPaid(item.total_paid || 0)
+    setLocalSince(item.total_paid_since || '')
     setLocalNotes(item.notes || '')
     setLocalDueDate(item.due_date || '')
-  }, [amount, item.total_paid, item.notes, item.due_date])
+  }, [amount, item.total_paid, item.total_paid_since, item.notes, item.due_date])
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -1128,55 +1200,65 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
     }
   }
 
+  const dueTone = type === 'card'
+    ? dueUrgencyTone(dueInfo.date, dueInfo.status)
+    : dueUrgencyTone(upcomingDue, isPaid ? 'settled' : null)
+  const showFee = feeInfo && (feeInfo.waiver > 0 || feeInfo.feeHitsThisMonth)
+  const placeholder = <span className="hidden xl:block" aria-hidden />
+
   return (
     <div className={`bg-white border rounded-xl overflow-hidden transition-all relative ${type === 'card' ? cardRowClass(dueInfo.status) : 'border-gray-200'
       }`}>
       {type === 'card' && bankMeta && (
-        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${bankMeta.barColor}`} />
+        <div className={`absolute left-0 top-0 bottom-0 w-1 ${bankMeta.barColor}`} />
       )}
-      <div className="py-3 px-4 sm:px-6 flex flex-wrap lg:flex-nowrap items-center gap-3 lg:gap-6">
-        {dragHandle && (
+      <div className={`py-3 pl-4 pr-4 sm:pl-5 sm:pr-5 flex flex-wrap lg:flex-nowrap items-center gap-3 lg:gap-6 ${ROW_GRID}`}>
+        {/* 1. Drag handle (empty slot keeps columns aligned when sorting disables drag) */}
+        {dragHandle || isOverlay ? (
           <button
             type="button"
             aria-label="Drag to reorder"
-            className="shrink-0 cursor-grab active:cursor-grabbing touch-none p-1.5 rounded-lg text-slate-300 hover:text-slate-500 hover:bg-slate-50"
-            {...dragHandle.attributes}
-            {...dragHandle.listeners}
+            className={`${iconButton} cursor-grab active:cursor-grabbing touch-none text-slate-300 hover:text-slate-500 hover:bg-slate-50`}
+            {...(dragHandle?.attributes || {})}
+            {...(dragHandle?.listeners || {})}
           >
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M9 5h2v2H9V5zm4 0h2v2h-2V5zM9 11h2v2H9v-2zm4 0h2v2h-2v-2zM9 17h2v2H9v-2zm4 0h2v2h-2v-2z" />
-            </svg>
+            <GripIcon />
           </button>
-        )}
+        ) : placeholder}
 
-        <div className="flex flex-col w-[200px] min-w-[160px] shrink-0">
-          <span className="text-sm font-medium text-gray-900 truncate">{item.nickname}</span>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {type === 'card' && bankMeta && (
-              <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${bankMeta.badgeClass}`}>
-                {bankMeta.name}
-              </span>
-            )}
-            {type === 'card' && statusMeta && (
-              <span className={`w-fit text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${statusMeta.className}`}>
-                {statusMeta.label}
-              </span>
-            )}
-          </div>
+        {/* 2. Name + badges */}
+        <div className="flex flex-col w-[200px] shrink-0 xl:w-auto xl:min-w-0">
+          <span className="text-sm font-semibold text-gray-900 truncate" title={item.nickname}>{item.nickname}</span>
+          {type === 'card' && (bankMeta || statusMeta) && (
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              {bankMeta && (
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-px rounded-full border ${bankMeta.badgeClass}`}>
+                  {bankMeta.name}
+                </span>
+              )}
+              {statusMeta && (
+                <span className={`text-[10px] font-semibold px-2 py-px rounded-full border ${statusMeta.className}`}>
+                  {statusMeta.label}
+                </span>
+              )}
+            </div>
+          )}
           {!isOverlay && (
             <button
               onClick={() => setShowDetails(!showDetails)}
-              className="text-[10px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 mt-0.5 text-left transition-colors tracking-widest uppercase"
+              aria-expanded={showDetails}
+              className="mt-1 w-fit inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-indigo-500 transition-colors"
             >
-              <span>{showDetails ? '▴ Hide Details' : '▾ Show Details'}</span>
+              <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${showDetails ? 'rotate-180' : ''}`} />
+              {showDetails ? 'Hide details' : 'Details'}
             </button>
           )}
         </div>
 
-        <div className="flex items-center gap-2 min-w-[200px] flex-1 lg:flex-none">
-          <span className="text-xs text-gray-400 uppercase tracking-wide shrink-0">Due</span>
+        {/* 3. Due date */}
+        <Stat label="Due" className="min-w-[170px] xl:min-w-0">
           {isEditingDueDate ? (
-            <>
+            <span className="inline-flex items-center gap-1.5">
               <input
                 type="number"
                 min="1" max="31"
@@ -1187,143 +1269,143 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
                   if (e.key === 'Escape') setIsEditingDueDate(false)
                 }}
                 autoFocus
-                className="w-12 px-1.5 py-0.5 text-xs font-mono border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-center"
+                className="w-14 h-7 px-1.5 text-sm tabular-nums border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-center"
               />
               <button
                 onClick={() => { onUpdateDueDate(localDueDate); setIsEditingDueDate(false) }}
-                className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
+                className="w-6 h-6 inline-flex items-center justify-center rounded-md text-emerald-600 hover:bg-emerald-50"
+                title="Save due day"
               >
                 ✓
               </button>
               <button
                 onClick={() => setIsEditingDueDate(false)}
-                className="text-[9px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest"
+                className="w-6 h-6 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
+                title="Cancel"
               >
                 ✕
               </button>
-            </>
+            </span>
           ) : (
-            <>
-              <span className={`text-sm font-medium ${dueInfo?.status === 'overdue' ? 'text-rose-700' : 'text-gray-800'}`}>
-                {dueLabel}
-              </span>
+            <span className="flex items-center gap-1 min-w-0">
+              <DueValue caption={dueLabel} tone={dueTone} />
               {!isOverlay && (
                 <button
                   onClick={() => setIsEditingDueDate(true)}
                   title="Edit due day"
-                  className="text-slate-300 hover:text-indigo-500 transition-colors ml-0.5"
+                  className="w-6 h-6 shrink-0 inline-flex items-center justify-center rounded-md text-slate-300 hover:text-indigo-500 hover:bg-slate-100 transition-colors"
                 >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536M9 11l6.364-6.364a2 2 0 112.828 2.828L11.828 13.828A2 2 0 0110 14.4V16h1.6a2 2 0 001.414-.586l.172-.172" />
-                  </svg>
+                  <PencilIcon className="w-3.5 h-3.5" />
                 </button>
               )}
-            </>
+            </span>
           )}
-        </div>
+        </Stat>
 
-        <div className="flex items-center gap-2 min-w-[120px]">
-          <span className="text-xs text-gray-400 uppercase tracking-wide">Amount</span>
+        {/* 4. Amount (or last payment once settled) */}
+        <Stat label={type === 'card' && isPaid && item.last_paid_at ? 'Last paid' : 'Amount'} className="min-w-[110px] xl:min-w-0">
           {isPaid ? (
-            <span className="text-emerald-600 font-bold text-[10px] bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100 tracking-widest uppercase">Paid</span>
+            type === 'card' && item.last_paid_at ? (
+              <>
+                <span className="font-semibold text-gray-900 tabular-nums">{formatINR(item.last_paid_amount || 0)}</span>
+                <span className="block text-[11px] text-slate-500 truncate" title={formatDateTime(item.last_paid_at)}>
+                  {formatDateTime(item.last_paid_at)}
+                </span>
+              </>
+            ) : (
+              <span className="inline-flex text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-px rounded-full border border-emerald-200">Paid</span>
+            )
+          ) : (amount || 0) > 0 ? (
+            <span className="font-semibold text-gray-900 tabular-nums">{formatINR(amount, amount % 1 ? 2 : 0)}</span>
           ) : (
-            <span className="font-semibold text-gray-900">
-              <span className="text-gray-400 mr-0.5 font-sans font-normal">₹</span>{(amount || 0).toLocaleString('en-IN')}
-            </span>
+            <span className="text-gray-400">—</span>
           )}
-        </div>
+        </Stat>
 
-        {type === 'card' && isPaid && item.last_paid_at && (
-          <div className="flex flex-col min-w-[160px] shrink-0">
-            <span className="text-xs text-gray-400 uppercase tracking-wide">Last paid</span>
-            <span className="text-sm font-semibold text-gray-900">
-              {formatINR(item.last_paid_amount || 0)}
-            </span>
-            <span className="text-[11px] text-slate-500">{formatDateTime(item.last_paid_at)}</span>
-          </div>
-        )}
-
-        {feeInfo && (feeInfo.waiver > 0 || feeInfo.feeHitsThisMonth) && (
-          <div className="hidden xl:flex flex-col min-w-[140px] shrink-0">
-            <span className="text-xs text-gray-400 uppercase tracking-wide">
-              {feeInfo.feeHitsThisMonth ? 'Annual Fee' : 'Waiver'}
-            </span>
-            {feeInfo.feeHitsThisMonth && (
-              <span className="text-xs font-semibold text-amber-700 mt-0.5">
-                {formatINR(feeInfo.feeAmount)} this month
-              </span>
-            )}
-            {feeInfo.waiver > 0 && !feeInfo.feeHitsThisMonth && (
-              <span className={`text-xs font-semibold mt-0.5 ${feeInfo.met ? 'text-emerald-600' : 'text-slate-600'}`}>
+        {/* 5. Fee waiver progress (xl+) */}
+        {showFee ? (
+          <Stat label={feeInfo.feeHitsThisMonth ? 'Annual fee' : 'Waiver'} display="hidden xl:flex">
+            {feeInfo.feeHitsThisMonth ? (
+              <span className="text-xs font-semibold text-amber-700">{formatINR(feeInfo.feeAmount)} this month</span>
+            ) : (
+              <span className={`text-xs font-semibold ${feeInfo.met ? 'text-emerald-600' : 'text-slate-600'}`}>
                 {feeInfo.met ? 'Target met ✓' : `${formatINR(feeInfo.remaining)} left`}
               </span>
             )}
-          </div>
-        )}
+          </Stat>
+        ) : placeholder}
 
-        {type === 'card' && utilPct !== null && (
-          <div className="hidden lg:flex flex-col min-w-[100px] shrink-0">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Utilization</span>
-            <div className="flex items-center gap-2 mt-0.5">
-              <div className="h-1.5 flex-1 rounded-full bg-slate-100 overflow-hidden min-w-[60px]">
-                <div
-                  className={`h-full rounded-full ${utilPct <= 30 ? 'bg-emerald-500' : utilPct <= 70 ? 'bg-amber-500' : 'bg-rose-500'}`}
+        {/* 6. Credit utilisation */}
+        {type === 'card' && utilPct !== null ? (
+          <Stat label="Utilization" display="hidden lg:flex" className="min-w-[100px] xl:min-w-0">
+            <span className="flex items-center gap-2">
+              <span className="h-1.5 flex-1 rounded-full bg-slate-100 overflow-hidden min-w-[48px]">
+                <span
+                  className={`block h-full rounded-full ${utilPct <= 30 ? 'bg-emerald-500' : utilPct <= 70 ? 'bg-amber-500' : 'bg-rose-500'}`}
                   style={{ width: `${utilPct}%` }}
                 />
-              </div>
-              <span className={`text-[10px] font-bold ${utilPct <= 30 ? 'text-emerald-600' : utilPct <= 70 ? 'text-amber-600' : 'text-rose-600'}`}>
+              </span>
+              <span className={`text-xs font-semibold tabular-nums ${utilPct <= 30 ? 'text-emerald-600' : utilPct <= 70 ? 'text-amber-600' : 'text-rose-600'}`}>
                 {utilPct}%
               </span>
-            </div>
-          </div>
-        )}
+            </span>
+          </Stat>
+        ) : placeholder}
 
-        {!isOverlay && (
-          <div className="flex-1 flex items-center gap-4 justify-end">
+        {/* 7. Actions (fixed-width column so optional buttons never shift other columns) */}
+        {!isOverlay ? (
+          <div className="flex-1 xl:flex-none flex items-center gap-2 justify-end">
             {type === 'card' && !isPaid && (
-              <div className="flex items-center gap-2">
+              <>
+                {localAmount.toString() !== (amount || '').toString() && (
+                  <button
+                    onClick={() => onUpdateBill(localAmount)}
+                    className="h-8 px-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                  >
+                    Save
+                  </button>
+                )}
                 <input
                   type="number"
                   value={localAmount}
                   onChange={(e) => setLocalAmount(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Set bill"
-                  className="w-28 px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/30 transition-all placeholder:text-slate-400"
+                  aria-label="Bill amount"
+                  className="w-28 h-8 px-3 text-sm tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/30 transition-all placeholder:text-slate-400"
                 />
-                {localAmount.toString() !== (amount || '').toString() && (
-                  <button
-                    onClick={() => onUpdateBill(localAmount)}
-                    className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
-                  >
-                    Save
-                  </button>
-                )}
-              </div>
+              </>
             )}
 
             {type === 'card' && (
               <button
-                onClick={onTogglePaid}
-                className={`px-5 py-1.5 text-[10px] font-bold rounded-full border transition-all shadow-sm tracking-widest uppercase ${isPaid
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-600 cursor-pointer hover:bg-emerald-100'
-                  : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-500 hover:text-indigo-600 active:scale-95'
+                onClick={() => {
+                  // A bill typed but not yet saved is paid as typed, not silently dropped.
+                  const typed = String(localAmount).trim()
+                  const pending = type === 'card' && !isPaid && typed !== '' && typed !== String(amount || '')
+                    ? (parseFloat(typed) || 0)
+                    : undefined
+                  onTogglePaid(pending)
+                }}
+                title={isPaid ? 'Undo: restores the bill and removes this payment' : undefined}
+                className={`h-8 px-3.5 text-xs font-semibold rounded-lg border whitespace-nowrap transition-all ${isPaid
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-100'
+                  : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-500 hover:text-indigo-600 active:scale-95'
                   }`}
               >
-                {isPaid ? 'Settled ✓' : 'Mark Paid'}
+                {isPaid ? 'Settled ✓' : 'Mark paid'}
               </button>
             )}
 
             <button
               onClick={onDelete}
-              className="text-slate-400 hover:text-rose-600 transition-all p-1.5 rounded-lg hover:bg-rose-50 group/del"
-              title="Delete Item"
+              className={`${iconButton} hover:text-rose-600 hover:bg-rose-50`}
+              title="Delete"
             >
-              <svg className="w-4 h-4 transition-transform group-hover/del:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
+              <TrashIcon />
             </button>
           </div>
-        )}
+        ) : placeholder}
       </div>
 
       {showDetails && (
@@ -1404,32 +1486,56 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
               <div className="flex items-center gap-2">
                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total Paid</p>
                 <button
-                  onClick={() => setIsEditingTotalPaid(!isEditingTotalPaid)}
+                  onClick={() => {
+                    setLocalTotalPaid(item.total_paid || 0)
+                    setLocalSince(item.total_paid_since || '')
+                    setIsEditingTotalPaid(!isEditingTotalPaid)
+                  }}
                   className="text-[9px] font-bold text-indigo-500 hover:text-indigo-600 uppercase tracking-widest"
                 >
                   {isEditingTotalPaid ? 'Cancel' : 'Edit'}
                 </button>
               </div>
               {isEditingTotalPaid ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={localTotalPaid}
-                    onChange={(e) => setLocalTotalPaid(e.target.value)}
-                    className="w-24 px-2 py-0.5 text-xs font-mono border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
-                  />
+                <div className="flex flex-wrap items-end gap-2 mt-1">
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-[10px] text-slate-400">Amount</span>
+                    <input
+                      type="number"
+                      value={localTotalPaid}
+                      onChange={(e) => setLocalTotalPaid(e.target.value)}
+                      className="w-28 h-8 px-2 text-sm tabular-nums border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-[10px] text-slate-400">Counting since</span>
+                    <input
+                      type="month"
+                      value={localSince}
+                      max={new Date().toISOString().slice(0, 7)}
+                      onChange={(e) => setLocalSince(e.target.value)}
+                      className="w-40 h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                    />
+                  </label>
                   <button
                     onClick={() => {
-                      onUpdateTotalPaid(localTotalPaid)
+                      onUpdateTotalPaid(localTotalPaid, localSince)
                       setIsEditingTotalPaid(false)
                     }}
-                    className="text-[9px] font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-widest"
+                    className="h-8 px-3 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md"
                   >
                     Save
                   </button>
                 </div>
               ) : (
-                <p className="text-sm font-mono font-semibold text-slate-700">{formatINR(item.total_paid || 0)}</p>
+                <>
+                  <p className="text-sm font-semibold text-slate-700 tabular-nums">{formatINR(item.total_paid || 0)}</p>
+                  <p className="text-[11px] text-slate-500">
+                    {item.total_paid_since
+                      ? `since ${formatMonthKey(item.total_paid_since)}`
+                      : 'Start month not set'}
+                  </p>
+                </>
               )}
             </div>
 
