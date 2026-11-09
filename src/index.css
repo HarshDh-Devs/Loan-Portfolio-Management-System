@@ -12,16 +12,16 @@
  */
 .dashboard-shell--dark {
   color-scheme: dark;
-  --dash-bg: #0f1218;
-  --dash-surface: #161a21;
-  --dash-raised: #1a1f27;
-  --dash-input: #1d222b;
-  --dash-hover: #222833;
-  --dash-border: #2a313c;
-  --dash-border-strong: #3a424f;
+  --dash-bg: #14181e;
+  --dash-surface: #1b2028;
+  --dash-raised: #20262f;
+  --dash-input: #232a33;
+  --dash-hover: #283039;
+  --dash-border: #313945;
+  --dash-border-strong: #424b59;
   --dash-text: #eceef2;
-  --dash-muted: #aab2bf;
-  --dash-faint: #7a8392;
+  --dash-muted: #b0b8c4;
+  --dash-faint: #838c9b;
   background-color: var(--dash-bg);
   color: var(--dash-text);
 }
@@ -40,7 +40,7 @@
 
 /* Sticky navbar: translucent with blur so content softly shows through on scroll. */
 .dashboard-shell--dark nav.bg-white {
-  background-color: rgba(15, 18, 24, 0.82);
+  background-color: rgba(20, 24, 30, 0.82);
   backdrop-filter: saturate(140%) blur(12px);
   -webkit-backdrop-filter: saturate(140%) blur(12px);
   box-shadow: 0 1px 0 var(--dash-border);
