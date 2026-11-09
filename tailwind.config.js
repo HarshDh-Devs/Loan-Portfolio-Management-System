@@ -24,15 +24,15 @@ const CHROMATIC = [
 const FAMILIES = [...NEUTRALS, ...CHROMATIC]
 
 // Dark surface that tinted chips/badges are blended onto (matches --dash-surface).
-const DARK_SURFACE = '#161a21'
+const DARK_SURFACE = '#1b2028'
 const DARK_WHITE = DARK_SURFACE
 
 // Cool, inverted neutral ramp for dark mode (50 = subtle raised surface, 900 = primary text).
 const DARK_NEUTRAL_BG = {
-  50: '#1a1f27', 100: '#222833', 200: '#2a313c', 300: '#3a424f', 400: '#7a8392',
-  500: '#939cab', 600: '#aab2bf', 700: '#c6ccd6', 800: '#dce0e7', 900: '#eceef2', 950: '#f6f7f9',
+  50: '#20262f', 100: '#283039', 200: '#313945', 300: '#424b59', 400: '#838c9b',
+  500: '#9aa3b1', 600: '#b0b8c4', 700: '#c9cfd8', 800: '#dde1e8', 900: '#eceef2', 950: '#f6f7f9',
 }
-const DARK_NEUTRAL_TEXT = { ...DARK_NEUTRAL_BG, 300: '#545d6b' }
+const DARK_NEUTRAL_TEXT = { ...DARK_NEUTRAL_BG, 300: '#5c6575' }
 
 // Chromatic tints (50–300) become the brand hue blended into the dark surface.
 const TINT_MIX = { 50: 0.12, 100: 0.18, 200: 0.3, 300: 0.42 }
