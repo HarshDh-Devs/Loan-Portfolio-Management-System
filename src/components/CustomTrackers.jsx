@@ -16,6 +16,21 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import { formatINR } from '../utils/format'
+import { PencilIcon, TrashIcon, ChevronDownIcon, GripIcon, iconButton } from './icons'
+
+// Fixed column widths per column type, so every tracker table lines up.
+// Text columns get no width and share the remaining space.
+const COLUMN_WIDTH = { date: 136, amount: 152, number: 120 }
+const HANDLE_COL_WIDTH = 40
+const NOTES_COL_WIDTH = 260
+const ACTIONS_COL_WIDTH = 88
+
+const signedINR = (num) => `${num > 0 ? '+' : num < 0 ? '−' : ''}${formatINR(Math.abs(num))}`
+const isNumericType = (type) => type === 'amount' || type === 'number'
+const amountTone = (num) => (num > 0 ? 'text-emerald-600' : num < 0 ? 'text-rose-600' : 'text-slate-700')
+
+// Header control: one height, radius and type size for every button in the tracker header.
+const headerButton = 'h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold transition-colors'
 import {
   addCustomTracker,
   updateCustomTracker,
@@ -23,8 +38,10 @@ import {
   reorderCustomTrackers,
   addTrackerEntry,
   updateTrackerEntry,
+  updateTrackerEntryNotes,
   deleteTrackerEntry,
   reorderTrackerEntries,
+  refreshFinanceData,
 } from '../data/financeStorage'
 
 // ── Main Custom Trackers Section ─────────────────────────────────────────────
@@ -60,7 +77,15 @@ export default function CustomTrackers({ session, trackers, onTrackersChange, da
       console.error('Custom Tracker persistence error:', err)
       setSaveStatus('error')
       setSaveError(err.message || 'Failed to save changes')
-      alert('Could not persist changes to the database: ' + (err.message || 'Network error') + '. Your changes are preserved in the current session.')
+      // Nothing was saved (writes are all-or-nothing). Put the screen back to
+      // the saved data so it never shows a change that doesn't exist.
+      try {
+        const fresh = await refreshFinanceData(session)
+        onTrackersChange(fresh.custom_trackers || [])
+      } catch {
+        // Offline: keep the current view; the error banner explains it.
+      }
+      alert('Could not save this change: ' + (err.message || 'Network error') + '. Nothing was changed; the tracker shows your last saved data.')
     }
   }
 
@@ -205,11 +230,14 @@ export default function CustomTrackers({ session, trackers, onTrackersChange, da
         entries: (t.entries || []).map(e => e.id === entry.id ? { ...e, notes: updatedNotes } : e),
       }
     }))
-    await executePersist(() => updateTrackerEntry(session, trackerId, entry.id, { notes: updatedNotes }))
+    await executePersist(() =>
+      updateTrackerEntryNotes(session, trackerId, entry.id, (saved) => [...saved, newNoteText.trim()])
+    )
   }
 
   // Remove a note from an entry
   const handleRemoveNote = async (trackerId, entry, noteIndex) => {
+    const noteText = (entry.notes || [])[noteIndex]
     const updatedNotes = (entry.notes || []).filter((_, i) => i !== noteIndex)
     onTrackersChange((trackers || []).map(t => {
       if (t.id !== trackerId) return t
@@ -218,7 +246,14 @@ export default function CustomTrackers({ session, trackers, onTrackersChange, da
         entries: (t.entries || []).map(e => e.id === entry.id ? { ...e, notes: updatedNotes } : e),
       }
     }))
-    await executePersist(() => updateTrackerEntry(session, trackerId, entry.id, { notes: updatedNotes }))
+    // Remove this note by its text from the latest saved list (an index from a
+    // stale screen could point at a different note).
+    await executePersist(() =>
+      updateTrackerEntryNotes(session, trackerId, entry.id, (saved) => {
+        const at = saved.indexOf(noteText)
+        return at < 0 ? saved : saved.filter((_, i) => i !== at)
+      })
+    )
   }
 
   // Drag reorder entries
@@ -445,6 +480,12 @@ function CategoryCard({
     return Math.round(sum * 100) / 100
   }, [entries, columns])
 
+  const firstAmountIdx = columns.findIndex(c => c.type === 'amount')
+  const showTotalRow = tracker.show_total && entries.length > 0 && firstAmountIdx >= 0
+  const tableMinWidth =
+    HANDLE_COL_WIDTH + NOTES_COL_WIDTH + ACTIONS_COL_WIDTH +
+    columns.reduce((sum, c) => sum + (COLUMN_WIDTH[c.type] || 180), 0)
+
   const handleEntryDragEnd = (event) => {
     const { active, over } = event
     setActiveEntryId(null)
@@ -462,13 +503,13 @@ function CategoryCard({
   return (
     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm transition-all hover:border-gray-300">
       {/* Category Header */}
-      <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/40">
-        <div className="flex items-center gap-3">
+      <div className="px-4 sm:px-5 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/40">
+        <div className="flex items-center gap-2 min-w-0">
           {dragHandle && (
             <button
               type="button"
               aria-label="Drag to reorder category"
-              className="cursor-grab active:cursor-grabbing p-1.5 rounded-lg text-slate-300 hover:text-slate-500 hover:bg-slate-100 transition-colors"
+              className={`${iconButton} cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 hover:bg-slate-100`}
               {...dragHandle.attributes}
               {...dragHandle.listeners}
               onPointerDown={(e) => {
@@ -476,74 +517,77 @@ function CategoryCard({
                 dragHandle.listeners?.onPointerDown?.(e)
               }}
             >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M9 5h2v2H9V5zm4 0h2v2h-2V5zM9 11h2v2H9v-2zm4 0h2v2h-2v-2zM9 17h2v2H9v-2zm4 0h2v2h-2v-2z" />
-              </svg>
+              <GripIcon />
             </button>
           )}
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onToggleCollapse}
-              className="text-left font-bold text-gray-900 text-sm hover:text-indigo-600 transition-colors flex items-center gap-2 group"
-            >
-              <span>{tracker.name}</span>
-              <span className="text-[10px] text-slate-400 group-hover:text-indigo-500 transition-colors">
-                {tracker.is_collapsed ? '▾' : '▴'}
-              </span>
-            </button>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded-full">
-              {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
-            </span>
-          </div>
+          <button
+            onClick={onToggleCollapse}
+            aria-expanded={!tracker.is_collapsed}
+            className="h-8 flex items-center gap-1.5 min-w-0 text-left font-semibold text-gray-900 text-[15px] hover:text-indigo-600 transition-colors group"
+          >
+            <span className="truncate">{tracker.name}</span>
+            <ChevronDownIcon
+              className={`w-4 h-4 shrink-0 text-slate-400 group-hover:text-indigo-500 transition-transform ${tracker.is_collapsed ? '-rotate-90' : ''}`}
+            />
+          </button>
+          <span className="shrink-0 text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full tabular-nums">
+            {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+          </span>
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={onOpenAddEntry}
-            className="px-3 py-1 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-all flex items-center gap-1 shadow-sm"
+            className={`${headerButton} bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm`}
           >
-            <span>+ Entry</span>
+            + Entry
           </button>
 
           <button
             onClick={onOpenColumns}
-            className="px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
+            className={`${headerButton} border border-slate-200 text-slate-600 hover:text-gray-900 hover:bg-slate-100`}
             title="Configure columns for this category"
           >
-            Columns ({columns.length})
+            Columns
+            <span className="text-slate-400 tabular-nums">{columns.length}</span>
           </button>
 
           <button
             onClick={onToggleTotal}
-            className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors border ${tracker.show_total
-              ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-              : 'text-slate-400 border-slate-200 hover:bg-slate-50'
-              }`}
-            title="Toggle category total"
+            role="switch"
+            aria-checked={!!tracker.show_total}
+            className={`${headerButton} border border-slate-200 text-slate-600 hover:text-gray-900 hover:bg-slate-100`}
+            title="Show or hide the category total"
           >
-            {tracker.show_total ? 'Total: ON' : 'Total: OFF'}
+            Total
+            <span
+              className={`relative inline-block w-7 h-4 rounded-full transition-colors ${tracker.show_total ? 'bg-indigo-600' : 'bg-slate-300'}`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full shadow-sm transition-transform ${tracker.show_total ? 'translate-x-3' : ''}`}
+                style={{ backgroundColor: '#fff' }}
+              />
+            </span>
           </button>
+
+          <span className="w-px h-5 bg-slate-200 mx-0.5" aria-hidden />
 
           <button
             onClick={onStartRename}
-            className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            className={`${iconButton} hover:text-gray-900 hover:bg-slate-100`}
             title="Rename category"
           >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536M9 11l6.364-6.364a2 2 0 112.828 2.828L11.828 13.828A2 2 0 0110 14.4V16h1.6a2 2 0 001.414-.586l.172-.172" />
-            </svg>
+            <PencilIcon />
           </button>
 
           <button
             onClick={onDeleteCategory}
-            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+            className={`${iconButton} hover:text-rose-600 hover:bg-rose-50`}
             title="Delete category"
           >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
+            <TrashIcon />
           </button>
         </div>
       </div>
@@ -570,17 +614,28 @@ function CategoryCard({
                 onDragStart={(e) => setActiveEntryId(e.active.id)}
                 onDragEnd={handleEntryDragEnd}
               >
-                <table className="w-full text-left border-collapse min-w-[500px]">
+                <table className="w-full table-fixed text-left border-collapse" style={{ minWidth: tableMinWidth }}>
+                  <colgroup>
+                    <col style={{ width: HANDLE_COL_WIDTH }} />
+                    {columns.map(col => (
+                      <col key={col.id} style={COLUMN_WIDTH[col.type] ? { width: COLUMN_WIDTH[col.type] } : undefined} />
+                    ))}
+                    <col style={{ width: NOTES_COL_WIDTH }} />
+                    <col style={{ width: ACTIONS_COL_WIDTH }} />
+                  </colgroup>
                   <thead>
-                    <tr className="border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      <th className="py-2.5 px-2 w-8"></th>
+                    <tr className="border-b border-slate-200 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                      <th className="py-2.5 px-2"><span className="sr-only">Reorder</span></th>
                       {columns.map(col => (
-                        <th key={col.id} className="py-2.5 px-3 font-bold">
+                        <th
+                          key={col.id}
+                          className={`py-2.5 px-3 font-semibold truncate ${isNumericType(col.type) ? 'text-right pr-6' : ''}`}
+                        >
                           {col.name}
                         </th>
                       ))}
-                      <th className="py-2.5 px-3">Notes</th>
-                      <th className="py-2.5 px-3 text-right w-20">Actions</th>
+                      <th className="py-2.5 px-3 font-semibold">Notes</th>
+                      <th className="py-2.5 px-3 font-semibold text-right"><span className="sr-only">Actions</span></th>
                     </tr>
                   </thead>
                   <SortableContext items={entries.map(e => e.id)} strategy={verticalListSortingStrategy}>
@@ -598,40 +653,36 @@ function CategoryCard({
                       ))}
                     </tbody>
                   </SortableContext>
+
+                  {/* Category total, sitting directly under the (first) Amount column */}
+                  {showTotalRow && (
+                    <tfoot>
+                      <tr className="border-t border-slate-200">
+                        <td colSpan={firstAmountIdx + 1} className="pt-4 pb-1 pr-3" style={{ paddingLeft: HANDLE_COL_WIDTH + 12 }}>
+                          <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                            Total
+                          </span>
+                        </td>
+                        <td className={`pt-4 pb-1 px-3 pr-6 text-right text-base font-bold tabular-nums whitespace-nowrap ${amountTone(totalAmount)}`}>
+                          {signedINR(totalAmount)}
+                        </td>
+                        <td colSpan={columns.length - firstAmountIdx + 1} className="pt-4 pb-1 px-3">
+                          {totalAmount !== 0 && (
+                            <span
+                              className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${totalAmount > 0
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-rose-50 text-rose-700 border-rose-200'
+                                }`}
+                            >
+                              {totalAmount > 0 ? 'Surplus · receivable' : 'Deficit · payable'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </DndContext>
-            </div>
-          )}
-
-          {/* Category Total Footer */}
-          {tracker.show_total && entries.length > 0 && (
-            <div className="mt-4 pt-3 border-t border-slate-200 flex items-center justify-between text-sm">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                Category Total
-              </span>
-              <div className="flex items-center gap-2">
-                <span
-                  className={`text-base font-bold font-mono ${totalAmount > 0
-                    ? 'text-emerald-600'
-                    : totalAmount < 0
-                      ? 'text-rose-600'
-                      : 'text-slate-700'
-                    }`}
-                >
-                  {totalAmount > 0 ? '+ ' : totalAmount < 0 ? '- ' : ''}
-                  {formatINR(Math.abs(totalAmount))}
-                </span>
-                {totalAmount !== 0 && (
-                  <span
-                    className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${totalAmount > 0
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-rose-50 text-rose-700 border-rose-200'
-                      }`}
-                  >
-                    {totalAmount > 0 ? 'Surplus / Receivable' : 'Deficit / Payable'}
-                  </span>
-                )}
-              </div>
             </div>
           )}
         </div>
@@ -667,13 +718,13 @@ function SortableEntryRow({ entry, columns, onEdit, onDelete, onAddNote, onRemov
   }
 
   return (
-    <tr ref={setNodeRef} style={style} className="hover:bg-slate-50/70 transition-colors group/row">
+    <tr ref={setNodeRef} style={style} className="hover:bg-slate-50/70 transition-colors group/row align-middle">
       {/* Drag handle */}
-      <td className="py-2.5 px-2 text-slate-300">
+      <td className="py-2 px-1">
         <button
           type="button"
           aria-label="Drag entry"
-          className="cursor-grab active:cursor-grabbing p-1 rounded hover:text-slate-500 transition-colors"
+          className={`${iconButton} cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500`}
           {...attributes}
           {...listeners}
           onPointerDown={(e) => {
@@ -681,9 +732,7 @@ function SortableEntryRow({ entry, columns, onEdit, onDelete, onAddNote, onRemov
             listeners?.onPointerDown?.(e)
           }}
         >
-          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M9 5h2v2H9V5zm4 0h2v2h-2V5zM9 11h2v2H9v-2zm4 0h2v2h-2v-2zM9 17h2v2H9v-2zm4 0h2v2h-2v-2z" />
-          </svg>
+          <GripIcon />
         </button>
       </td>
 
@@ -691,24 +740,29 @@ function SortableEntryRow({ entry, columns, onEdit, onDelete, onAddNote, onRemov
       {columns.map(col => {
         const val = entry.values?.[col.id]
         return (
-          <td key={col.id} className="py-2.5 px-3">
+          <td
+            key={col.id}
+            className={`py-3 px-3 ${isNumericType(col.type) ? 'text-right pr-6 whitespace-nowrap' : 'truncate'}`}
+            title={col.type === 'text' && val ? String(val) : undefined}
+          >
             <CellDisplay type={col.type} value={val} />
           </td>
         )
       })}
 
       {/* Attached Notes */}
-      <td className="py-2.5 px-3">
+      <td className="py-2 px-3">
         <div className="flex flex-wrap items-center gap-1.5">
           {(entry.notes || []).map((note, idx) => (
             <span
               key={idx}
-              className="inline-flex items-center gap-1 text-[11px] font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full border border-slate-200"
+              className="inline-flex items-center gap-1 max-w-full text-xs font-medium bg-slate-100 text-slate-700 pl-2.5 pr-1 py-0.5 rounded-full border border-slate-200"
+              title={note}
             >
-              <span>{note}</span>
+              <span className="truncate">{note}</span>
               <button
                 onClick={() => onRemoveNote(idx)}
-                className="text-slate-400 hover:text-rose-600 transition-colors ml-0.5"
+                className="shrink-0 w-4 h-4 inline-flex items-center justify-center rounded-full text-[10px] text-slate-400 hover:text-rose-600 transition-colors"
                 title="Remove note"
               >
                 ✕
@@ -746,7 +800,7 @@ function SortableEntryRow({ entry, columns, onEdit, onDelete, onAddNote, onRemov
           ) : (
             <button
               onClick={() => setShowAddNoteInput(true)}
-              className="text-[10px] font-bold text-slate-400 hover:text-indigo-600 uppercase tracking-widest px-1.5 py-0.5 rounded hover:bg-slate-100 transition-colors"
+              className={`h-6 px-2 text-xs font-medium text-slate-400 hover:text-indigo-600 rounded-md hover:bg-slate-100 transition-colors ${(entry.notes || []).length ? '' : '-ml-2'}`}
             >
               + Note
             </button>
@@ -755,25 +809,21 @@ function SortableEntryRow({ entry, columns, onEdit, onDelete, onAddNote, onRemov
       </td>
 
       {/* Row Actions */}
-      <td className="py-2.5 px-3 text-right">
-        <div className="inline-flex items-center gap-2">
+      <td className="py-2 px-2 text-right">
+        <div className="inline-flex items-center gap-1 opacity-70 group-hover/row:opacity-100 focus-within:opacity-100 transition-opacity">
           <button
             onClick={onEdit}
-            className="text-slate-400 hover:text-indigo-600 transition-colors p-1"
+            className={`${iconButton} hover:text-indigo-600 hover:bg-slate-100`}
             title="Edit entry"
           >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536M9 11l6.364-6.364a2 2 0 112.828 2.828L11.828 13.828A2 2 0 0110 14.4V16h1.6a2 2 0 001.414-.586l.172-.172" />
-            </svg>
+            <PencilIcon />
           </button>
           <button
             onClick={onDelete}
-            className="text-slate-400 hover:text-rose-600 transition-colors p-1"
+            className={`${iconButton} hover:text-rose-600 hover:bg-rose-50`}
             title="Delete entry"
           >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
+            <TrashIcon />
           </button>
         </div>
       </td>
@@ -783,24 +833,20 @@ function SortableEntryRow({ entry, columns, onEdit, onDelete, onAddNote, onRemov
 
 function CellDisplay({ type, value }) {
   if (value === null || value === undefined || value === '') {
-    return <span className="text-slate-300 font-mono text-xs">—</span>
+    return <span className="text-slate-300 text-sm">—</span>
   }
 
   if (type === 'amount') {
     const num = parseFloat(value) || 0
     return (
-      <span
-        className={`font-semibold font-mono text-xs ${num > 0 ? 'text-emerald-600' : num < 0 ? 'text-rose-600' : 'text-slate-700'
-          }`}
-      >
-        {num > 0 ? '+ ' : num < 0 ? '- ' : ''}
-        {formatINR(Math.abs(num))}
+      <span className={`text-sm font-semibold tabular-nums ${amountTone(num)}`}>
+        {signedINR(num)}
       </span>
     )
   }
 
   if (type === 'date') {
-    if (!value) return <span className="text-slate-300 font-mono text-xs">—</span>
+    if (!value) return <span className="text-slate-300 text-sm">—</span>
     const str = String(value)
     const parts = str.split('-')
     if (parts.length === 3) {
@@ -808,7 +854,7 @@ function CellDisplay({ type, value }) {
       if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
         const dateObj = new Date(y, m - 1, d)
         return (
-          <span className="text-slate-600 text-xs font-medium">
+          <span className="text-slate-700 text-sm tabular-nums whitespace-nowrap">
             {dateObj.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
           </span>
         )
@@ -816,7 +862,7 @@ function CellDisplay({ type, value }) {
     }
     const d = new Date(value)
     return (
-      <span className="text-slate-600 text-xs font-medium">
+      <span className="text-slate-700 text-sm tabular-nums whitespace-nowrap">
         {!isNaN(d)
           ? d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
           : str}
@@ -827,13 +873,13 @@ function CellDisplay({ type, value }) {
   if (type === 'number') {
     const n = Number(value)
     return (
-      <span className="font-mono text-slate-700 text-xs">
+      <span className="text-slate-700 text-sm tabular-nums">
         {!isNaN(n) ? n.toLocaleString('en-IN') : String(value)}
       </span>
     )
   }
 
-  return <span className="text-slate-700 text-xs">{String(value)}</span>
+  return <span className="text-slate-700 text-sm">{String(value)}</span>
 }
 
 // ── Modals ───────────────────────────────────────────────────────────────────
