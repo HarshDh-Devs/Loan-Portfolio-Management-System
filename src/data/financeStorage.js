@@ -29,99 +29,141 @@ function saveLocalData(data) {
   try {
     localStorage.setItem(LOCAL_KEY, JSON.stringify(data))
   } catch {
-    // Ignore quota / private-mode errors
+    // Ignore quota / private-mode errors (this is only a cache when signed in)
   }
 }
 
-// ── Serialized Write Queue + In-Memory Cache ─────────────────────────────────
+// ── Write model ──────────────────────────────────────────────────────────────
 //
-// ROOT FIX for data corruption (bills swapping, paid not persisting):
+// All finance data lives in ONE JSON blob per user. Every write goes through
+// `mutate()`, which guarantees:
 //
-// Every read-modify-write operation is serialized through a single promise
-// chain. This guarantees operations execute one-at-a-time, so no two
-// concurrent writes can overwrite each other (the "lost update" race).
-//
-// The in-memory cache means subsequent reads are instant and always reflect
-// the latest state — no stale reads from Supabase mid-operation.
+//  1. Serialized: writes run one at a time, so two clicks can never interleave.
+//  2. Fresh base: each write re-reads the latest saved blob (Supabase row, or
+//     localStorage in guest mode) and applies ONLY its own change to it. A tab
+//     or device holding an old copy can therefore never overwrite changes made
+//     elsewhere; it only adds its own edit on top.
+//  3. All-or-nothing: the change is applied to a copy. The in-memory cache and
+//     localStorage are only updated after the save succeeds, so a failed save
+//     leaves no half-applied or "phantom" values behind.
+//  4. Revision counter (`_rev`): bumped on every save, so we can tell when data
+//     changed somewhere else and notify the UI to refresh.
 
-let _cache = null          // In-memory finance data blob (source of truth after load)
-let _rowId = null          // Cached Supabase row ID (avoids extra SELECT on every save)
-let _cachedUserId = null   // Tracks which user the cache belongs to
-let _queue = Promise.resolve()  // Promise chain serializing all mutations
+let _cache = null          // Last known saved blob (read cache)
+let _rowId = null          // Supabase row ID of the user's blob
+let _cachedUserId = null   // Which user the cache belongs to
+let _queue = Promise.resolve()  // Promise chain serializing all operations
 
-/**
- * Enqueue an async operation so it waits for all prior operations to finish.
- * This is the core concurrency fix — no two operations can overlap.
- */
 function serialized(asyncFn) {
   const task = _queue.then(asyncFn)
   _queue = task.catch(() => { })  // Keep the chain alive even on rejection
   return task
 }
 
-/**
- * Load finance data into the in-memory cache. First call hits Supabase
- * (or localStorage for offline). Subsequent calls return instantly from cache.
- * Automatically resets if the user session changes.
- */
+const clone = (obj) => JSON.parse(JSON.stringify(obj))
+const revOf = (d) => Number(d?._rev) || 0
+
+// ── Change notifications (another tab/device changed the data) ───────────────
+
+const _listeners = new Set()
+
+export function onFinanceDataChanged(callback) {
+  _listeners.add(callback)
+  return () => _listeners.delete(callback)
+}
+
+function emitChanged(data) {
+  const snap = snapshot(data)
+  _listeners.forEach(cb => {
+    try { cb(snap) } catch (err) { console.error(err) }
+  })
+}
+
+function snapshot(d) {
+  const c = clone(d)
+  return {
+    cards: c.cards || [],
+    subscriptions: c.subscriptions || [],
+    expenses: c.expenses || [],
+    emis: c.emis || [],
+    custom_trackers: c.custom_trackers || [],
+    settings: c.settings || { available_balance: 0 },
+  }
+}
+
+// Guest mode: another tab of this browser saved to localStorage.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== LOCAL_KEY || _cachedUserId !== null || !_cache) return
+    const fresh = repair(getLocalData())
+    if (revOf(fresh) !== revOf(_cache)) {
+      _cache = fresh
+      emitChanged(_cache)
+    }
+  })
+}
+
+// ── Loading ──────────────────────────────────────────────────────────────────
+
+// Give every tracker entry a unique ID (repairs legacy duplicates).
+function repair(d) {
+  for (const tracker of d.custom_trackers || []) {
+    const seenIds = new Set()
+    if (tracker.entries) {
+      tracker.entries = tracker.entries.map(entry => {
+        if (!entry.id || seenIds.has(entry.id)) {
+          return { ...entry, id: crypto.randomUUID() }
+        }
+        seenIds.add(entry.id)
+        return entry
+      })
+    }
+  }
+  return d
+}
+
+/** Read the latest saved blob from its source of truth (never from the cache). */
+async function loadFresh(session) {
+  const userId = session?.user?.id || null
+  if (userId !== _cachedUserId) {
+    _cache = null
+    _rowId = null
+    _cachedUserId = userId
+  }
+
+  if (!session) return repair(getLocalData())
+
+  const { data, error } = await supabase
+    .from('finance_data')
+    .select('id, data')
+    .eq('user_id', session.user.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (error) throw error
+  if (data?.length > 0) {
+    _rowId = data[0].id
+    return repair({ ...getDefaultData(), ...data[0].data })
+  }
+  _rowId = null
+  return getDefaultData()
+}
+
+/** Cached read: hits storage only on first load or after a user switch. */
 async function ensureLoaded(session) {
   const userId = session?.user?.id || null
-
-  // If cache exists and belongs to the same user, return it instantly
   if (_cache && _cachedUserId === userId) return _cache
-
-  // Reset for new user / first load
-  _cache = null
-  _rowId = null
-  _cachedUserId = userId
-
-  if (session) {
-    const { data, error } = await supabase
-      .from('finance_data')
-      .select('id, data')
-      .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-    if (error) throw error
-    if (data?.length > 0) {
-      _rowId = data[0].id
-      _cache = { ...getDefaultData(), ...data[0].data }
-    } else {
-      _cache = getDefaultData()
-    }
-  } else {
-    _cache = getLocalData()
-  }
-
-  // Deduplicate / repair duplicate entry IDs if any exist in storage
-  if (_cache && _cache.custom_trackers) {
-    for (const tracker of _cache.custom_trackers) {
-      const seenIds = new Set()
-      if (tracker.entries) {
-        tracker.entries = tracker.entries.map(entry => {
-          if (!entry.id || seenIds.has(entry.id)) {
-            return { ...entry, id: crypto.randomUUID() }
-          }
-          seenIds.add(entry.id)
-          return entry
-        })
-      }
-    }
-  }
-
+  const fresh = await loadFresh(session)
+  _cache = fresh
   saveLocalData(_cache)
   return _cache
 }
 
-/**
- * Persist the current cache state to storage. Updates localStorage immediately,
- * then writes to Supabase in a single UPDATE using the cached row ID
- * (no extra SELECT round-trip).
- */
 async function persist(session, finData) {
-  saveLocalData(finData)
-  if (!session) return
-
+  if (!session) {
+    // Guest mode: localStorage IS the database, so a failed write must fail loudly.
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(finData))
+    return
+  }
   if (_rowId) {
     const { error } = await supabase
       .from('finance_data')
@@ -138,346 +180,284 @@ async function persist(session, finData) {
   }
 }
 
+/**
+ * Apply `mutator(draft)` to the latest saved data and save it.
+ * Resolves to (a copy of) whatever the mutator returns. Rejects if the save
+ * fails, in which case nothing (cache, localStorage, cloud) has changed.
+ */
+function mutate(session, mutator) {
+  return serialized(async () => {
+    const base = await loadFresh(session)
+    const draft = clone(base)
+    const result = mutator(draft)
+    draft._rev = revOf(base) + 1
+    draft._saved_at = new Date().toISOString()
+
+    await persist(session, draft)
+
+    const changedElsewhere = Boolean(_cache) && revOf(base) !== revOf(_cache)
+    _cache = draft
+    saveLocalData(draft)
+    if (changedElsewhere) emitChanged(draft)
+    return result === undefined || result === null ? result : clone(result)
+  })
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Reset the in-memory cache. Call on logout or when switching users.
- */
 export function resetFinanceCache() {
   _cache = null
   _rowId = null
   _cachedUserId = null
 }
 
-/**
- * Load all finance data in a single call. Returns { cards, subscriptions,
- * expenses, emis, settings }. Use this instead of calling getCards +
- * getSubscriptions + getExpenses + getSettings separately (avoids 4
- * redundant reads of the same blob).
- */
+/** Load all finance data (cached after the first call). Returns copies. */
 export function loadAllFinanceData(session) {
+  return serialized(async () => snapshot(await ensureLoaded(session)))
+}
+
+/**
+ * Re-read the latest saved data (e.g. when the tab regains focus). Notifies
+ * `onFinanceDataChanged` listeners if it differs from what this tab had.
+ */
+export function refreshFinanceData(session) {
   return serialized(async () => {
-    const d = await ensureLoaded(session)
-    return {
-      cards: d.cards || [],
-      subscriptions: d.subscriptions || [],
-      expenses: d.expenses || [],
-      emis: d.emis || [],
-      custom_trackers: JSON.parse(JSON.stringify(d.custom_trackers || [])),
-      settings: d.settings || { available_balance: 0 },
-    }
+    const fresh = await loadFresh(session)
+    const changed = !_cache || revOf(fresh) !== revOf(_cache)
+    _cache = fresh
+    saveLocalData(fresh)
+    if (changed) emitChanged(fresh)
+    return snapshot(fresh)
   })
 }
 
 export function getFinanceData(session) {
-  return serialized(() => ensureLoaded(session))
+  return serialized(async () => clone(await ensureLoaded(session)))
 }
 
-export function saveFinanceData(session, data) {
-  return serialized(async () => {
-    _cache = data
-    await persist(session, data)
-  })
-}
-
+/** Run `mutator(d)` against the latest saved data and save. Resolves to a snapshot. */
 export function patchFinanceData(session, mutator) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    mutator(d)
-    await persist(session, d)
-    return d
+  return mutate(session, (d) => { mutator(d); return snapshot(d) })
+}
+
+// ── Generic item helpers (cards / subscriptions / expenses / emis) ───────────
+
+function addItem(session, collection, item, extra = () => ({})) {
+  return mutate(session, (d) => {
+    const list = d[collection] || []
+    const newItem = { total_paid: 0, ...item, ...extra(list), id: crypto.randomUUID() }
+    d[collection] = [...list, newItem]
+    return newItem
   })
 }
+
+/**
+ * Update one item using a function of its CURRENT saved value, so derived
+ * fields (totals, payment history) are computed from fresh data, not from a
+ * possibly stale copy on screen. `fn` may return null for "no change".
+ * Resolves to the saved item, or null if it no longer exists.
+ */
+export function updateItemWith(session, collection, id, fn) {
+  return mutate(session, (d) => {
+    const list = d[collection] || []
+    const current = list.find(x => x.id === id)
+    if (!current) return null
+    const updates = fn(clone(current))
+    if (!updates) return current
+    const next = { ...current, ...updates, id: current.id }
+    d[collection] = list.map(x => (x.id === id ? next : x))
+    return next
+  })
+}
+
+function updateItem(session, collection, id, updates) {
+  return updateItemWith(session, collection, id, () => updates)
+}
+
+function deleteItem(session, collection, id) {
+  return mutate(session, (d) => {
+    d[collection] = (d[collection] || []).filter(x => x.id !== id)
+  })
+}
+
+const nextSortOrder = (list) => ({
+  sort_order: list.reduce((m, c) => Math.max(m, c.sort_order ?? -1), -1) + 1,
+})
+
+// New items start counting "total paid" from the current month.
+const startedNow = () => ({ total_paid_since: new Date().toISOString().slice(0, 7) })
 
 // ── Cards ────────────────────────────────────────────────────────────────────
 
 export function getCards(session) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    return d.cards || []
-  })
+  return serialized(async () => clone((await ensureLoaded(session)).cards || []))
 }
 
-export function addCard(session, card) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    const maxOrder = (d.cards || []).reduce((m, c) => Math.max(m, c.sort_order ?? -1), -1)
-    const newCard = { ...card, id: crypto.randomUUID(), total_paid: 0, sort_order: maxOrder + 1 }
-    d.cards = [...(d.cards || []), newCard]
-    await persist(session, d)
-    return newCard
-  })
-}
-
-export function updateCard(session, id, updates) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    d.cards = (d.cards || []).map(c => c.id === id ? { ...c, ...updates } : c)
-    await persist(session, d)
-  })
-}
-
-export function deleteCard(session, id) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    d.cards = (d.cards || []).filter(c => c.id !== id)
-    await persist(session, d)
-  })
-}
+export const addCard = (session, card) =>
+  addItem(session, 'cards', card, (list) => ({ ...nextSortOrder(list), ...startedNow() }))
+export const updateCard = (session, id, updates) => updateItem(session, 'cards', id, updates)
+export const deleteCard = (session, id) => deleteItem(session, 'cards', id)
 
 export function reorderCards(session, orderedIds) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
+  return mutate(session, (d) => {
     const orderMap = Object.fromEntries(orderedIds.map((id, i) => [id, i]))
     d.cards = (d.cards || []).map(c =>
       orderMap[c.id] == null ? c : { ...c, sort_order: orderMap[c.id] }
     )
-    await persist(session, d)
   })
 }
 
 // ── Subscriptions ────────────────────────────────────────────────────────────
 
 export function getSubscriptions(session) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    return d.subscriptions || []
-  })
+  return serialized(async () => clone((await ensureLoaded(session)).subscriptions || []))
 }
 
-export function addSubscription(session, sub) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    const newSub = { ...sub, id: crypto.randomUUID(), total_paid: 0 }
-    d.subscriptions = [...(d.subscriptions || []), newSub]
-    await persist(session, d)
-    return newSub
-  })
-}
-
-export function updateSubscription(session, id, updates) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    d.subscriptions = (d.subscriptions || []).map(s => s.id === id ? { ...s, ...updates } : s)
-    await persist(session, d)
-  })
-}
-
-export function deleteSubscription(session, id) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    d.subscriptions = (d.subscriptions || []).filter(s => s.id !== id)
-    await persist(session, d)
-  })
-}
+export const addSubscription = (session, sub) => addItem(session, 'subscriptions', sub, startedNow)
+export const updateSubscription = (session, id, updates) => updateItem(session, 'subscriptions', id, updates)
+export const deleteSubscription = (session, id) => deleteItem(session, 'subscriptions', id)
 
 // ── Manual EMIs ──────────────────────────────────────────────────────────────
 
 export function getManualEmis(session) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    return d.emis || []
-  })
+  return serialized(async () => clone((await ensureLoaded(session)).emis || []))
 }
 
-export function addManualEmi(session, emi) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    const newEmi = { ...emi, id: crypto.randomUUID(), total_paid: 0 }
-    d.emis = [...(d.emis || []), newEmi]
-    await persist(session, d)
-    return newEmi
-  })
-}
-
-export function updateManualEmi(session, id, updates) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    d.emis = (d.emis || []).map(e => e.id === id ? { ...e, ...updates } : e)
-    await persist(session, d)
-  })
-}
-
-export function deleteManualEmi(session, id) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    d.emis = (d.emis || []).filter(e => e.id !== id)
-    await persist(session, d)
-  })
-}
+export const addManualEmi = (session, emi) => addItem(session, 'emis', emi, startedNow)
+export const updateManualEmi = (session, id, updates) => updateItem(session, 'emis', id, updates)
+export const deleteManualEmi = (session, id) => deleteItem(session, 'emis', id)
 
 // ── Expenses ─────────────────────────────────────────────────────────────────
 
 export function getExpenses(session) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    return d.expenses || []
-  })
+  return serialized(async () => clone((await ensureLoaded(session)).expenses || []))
 }
 
-export function addExpense(session, expense) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    const newExp = { ...expense, id: crypto.randomUUID(), total_paid: 0 }
-    d.expenses = [...(d.expenses || []), newExp]
-    await persist(session, d)
-    return newExp
-  })
-}
-
-export function updateExpense(session, id, updates) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    d.expenses = (d.expenses || []).map(e => e.id === id ? { ...e, ...updates } : e)
-    await persist(session, d)
-  })
-}
-
-export function deleteExpense(session, id) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    d.expenses = (d.expenses || []).filter(e => e.id !== id)
-    await persist(session, d)
-  })
-}
+export const addExpense = (session, expense) => addItem(session, 'expenses', expense, startedNow)
+export const updateExpense = (session, id, updates) => updateItem(session, 'expenses', id, updates)
+export const deleteExpense = (session, id) => deleteItem(session, 'expenses', id)
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 export function getSettings(session) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    return d.settings || { available_balance: 0 }
-  })
+  return serialized(async () => clone((await ensureLoaded(session)).settings || { available_balance: 0 }))
 }
 
 export function saveSettings(session, settings) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
+  return mutate(session, (d) => {
     d.settings = { ...(d.settings || {}), ...settings }
-    await persist(session, d)
   })
 }
 
 // ── Custom Trackers ──────────────────────────────────────────────────────────
 
 export function getCustomTrackers(session) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
-    return d.custom_trackers || []
-  })
+  return serialized(async () => clone((await ensureLoaded(session)).custom_trackers || []))
 }
 
 export function addCustomTracker(session, tracker) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
+  return mutate(session, (d) => {
     const maxOrder = (d.custom_trackers || []).reduce((m, c) => Math.max(m, c.sort_order ?? -1), -1)
     const newTracker = {
-      id: crypto.randomUUID(),
-      name: tracker.name || 'Untitled Tracker',
-      show_total: tracker.show_total ?? true,
+      show_total: true,
       is_collapsed: false,
       sort_order: maxOrder + 1,
-      columns: tracker.columns || [
+      columns: [
         { id: crypto.randomUUID(), name: 'Date', type: 'date' },
         { id: crypto.randomUUID(), name: 'Amount', type: 'amount' },
         { id: crypto.randomUUID(), name: 'Description', type: 'text' }
       ],
-      entries: tracker.entries || [],
-      ...tracker
+      entries: [],
+      ...tracker,
+      name: tracker.name || 'Untitled Tracker',
+      id: crypto.randomUUID(),
     }
-    if (!newTracker.id) newTracker.id = crypto.randomUUID()
     d.custom_trackers = [...(d.custom_trackers || []), newTracker]
-    await persist(session, d)
     return newTracker
   })
 }
 
+/** Update tracker settings (name, columns, flags). Never touches its entries. */
 export function updateCustomTracker(session, id, updates) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
+  return mutate(session, (d) => {
     d.custom_trackers = (d.custom_trackers || []).map(t =>
-      t.id === id ? { ...t, ...updates } : t
+      t.id === id ? { ...t, ...updates, id: t.id, entries: t.entries } : t
     )
-    await persist(session, d)
   })
 }
 
 export function deleteCustomTracker(session, id) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
+  return mutate(session, (d) => {
     d.custom_trackers = (d.custom_trackers || []).filter(t => t.id !== id)
-    await persist(session, d)
   })
 }
 
 export function reorderCustomTrackers(session, orderedIds) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
+  return mutate(session, (d) => {
     const orderMap = Object.fromEntries(orderedIds.map((id, i) => [id, i]))
     d.custom_trackers = (d.custom_trackers || []).map(t =>
       orderMap[t.id] == null ? t : { ...t, sort_order: orderMap[t.id] }
     )
-    await persist(session, d)
   })
 }
 
 export function addTrackerEntry(session, trackerId, entry) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
+  return mutate(session, (d) => {
     const tracker = (d.custom_trackers || []).find(t => t.id === trackerId)
     if (!tracker) return null
-
     const maxOrder = (tracker.entries || []).reduce((m, e) => Math.max(m, e.sort_order ?? -1), -1)
     const newEntry = {
-      values: entry.values || {},
-      notes: entry.notes || [],
+      values: {},
+      notes: [],
       created_at: new Date().toISOString(),
       ...entry,
       id: crypto.randomUUID(),
       sort_order: maxOrder + 1,
     }
-
     tracker.entries = [...(tracker.entries || []), newEntry]
-    await persist(session, d)
     return newEntry
   })
 }
 
 export function updateTrackerEntry(session, trackerId, entryId, updates) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
+  return mutate(session, (d) => {
     const tracker = (d.custom_trackers || []).find(t => t.id === trackerId)
     if (!tracker) return
-
     tracker.entries = (tracker.entries || []).map(e =>
-      e.id === entryId ? { ...e, ...updates } : e
+      e.id === entryId ? { ...e, ...updates, id: e.id } : e
     )
-    await persist(session, d)
+  })
+}
+
+/**
+ * Update one entry's notes from its CURRENT saved notes (never a stale copy).
+ * Resolves to the saved notes array, or null if the entry no longer exists.
+ */
+export function updateTrackerEntryNotes(session, trackerId, entryId, fn) {
+  return mutate(session, (d) => {
+    const tracker = (d.custom_trackers || []).find(t => t.id === trackerId)
+    const entry = tracker?.entries?.find(e => e.id === entryId)
+    if (!entry) return null
+    entry.notes = fn([...(entry.notes || [])])
+    return entry.notes
   })
 }
 
 export function deleteTrackerEntry(session, trackerId, entryId) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
+  return mutate(session, (d) => {
     const tracker = (d.custom_trackers || []).find(t => t.id === trackerId)
     if (!tracker) return
-
     tracker.entries = (tracker.entries || []).filter(e => e.id !== entryId)
-    await persist(session, d)
   })
 }
 
 export function reorderTrackerEntries(session, trackerId, orderedEntryIds) {
-  return serialized(async () => {
-    const d = await ensureLoaded(session)
+  return mutate(session, (d) => {
     const tracker = (d.custom_trackers || []).find(t => t.id === trackerId)
     if (!tracker) return
-
     const orderMap = Object.fromEntries(orderedEntryIds.map((id, i) => [id, i]))
     tracker.entries = (tracker.entries || []).map(e =>
       orderMap[e.id] == null ? e : { ...e, sort_order: orderMap[e.id] }
     )
-    await persist(session, d)
   })
 }
-
