@@ -75,16 +75,22 @@ export default function CardIntelligence({ session }) {
     
     try {
       const cardSearch = card.card_name || card.nickname
-      const subreddits = 'CreditCardIndia+CreditCardsIndia+IndianCreditCards'
-      const redditUrl = `https://www.reddit.com/r/${subreddits}/search.json?q=%22${encodeURIComponent(cardSearch)}%22+credit+card&sort=relevance&t=month&restrict_sr=on&limit=40`
-      
-      const redditRes = await fetch(redditUrl)
-      const redditData = await redditRes.json()
-      const children = redditData.data?.children || []
 
-      if (children.length === 0) {
-        await updateCard(session, card.id, { 
-          market_intel: JSON.stringify({ sections: [{ title: "Card Profile Not Found", points: [`No specific community discussions found for "${cardSearch}" in the last 30 days.`] }] }),
+      // Posts and news are collected on the server (browsers are blocked by Reddit).
+      let sources
+      try {
+        const res = await fetch(`/api/card-sources?card=${encodeURIComponent(cardSearch)}`)
+        sources = await res.json()
+        if (!res.ok) throw new Error(sources?.error || `server answered ${res.status}`)
+      } catch (err) {
+        throw new Error(`couldn't collect posts and news (${err.message})`)
+      }
+      const items = sources.items || []
+
+      if (items.length === 0) {
+        const why = sources.errors?.length ? ` (sources unavailable: ${sources.errors.join('; ')})` : ''
+        await updateCard(session, card.id, {
+          market_intel: JSON.stringify({ sections: [{ title: 'Nothing new', points: [`No posts or news about "${cardSearch}" in the last 30 days${why}.`] }] }),
           market_intel_date: new Date().toISOString()
         })
         return loadCards()
@@ -92,10 +98,13 @@ export default function CardIntelligence({ session }) {
 
       // Keep the request within Groq's free per-request size.
       let rawIntel = ''
-      children.forEach((child, i) => {
-        const p = child.data
-        if (p.over_18 || p.author === 'AutoModerator') return
-        const entry = `[SOURCE ${i+1}] TITLE: ${p.title}\nCONTENT: ${(p.selftext || '').substring(0, 500)}\n\n`
+      items.forEach((it, i) => {
+        const when = it.date ? new Date(it.date).toISOString().slice(0, 10) : 'unknown date'
+        const entry = `[${i + 1}] ${it.source} · ${when}
+TITLE: ${it.title}
+${it.text ? `TEXT: ${it.text}
+` : ''}
+`
         if (rawIntel.length + entry.length <= INTEL_MAX_CHARS) rawIntel += entry
       })
 
@@ -105,14 +114,19 @@ export default function CardIntelligence({ session }) {
         schemaName: 'card_intel',
         messages: [{
           role: 'system',
-          content: `You are an Expert Investigative Financial Journalist. Report ONLY on "${cardSearch}". If the data doesn't mention "${cardSearch}", return one section titled "No Card Relevance" with the point "No specific data for ${cardSearch} found.". 10-14 day focus. Verbose points. Reply in JSON.`
-        }, { role: 'user', content: `DATA:\n${rawIntel}` }],
+          content: `You summarise recent Reddit posts and news about the Indian credit card "${cardSearch}" for its owner, in plain, friendly English.
+Use only the data given. Ignore items that are about a different card. Prefer the newest items and say roughly when (e.g. "early November").
+Sections, in this order, only if there is something to say: "Changes to know" (devaluations, fee or reward changes, new caps), "Offers & benefits", "What people are saying", "Tip" (one practical suggestion).
+Each point is one or two short sentences with real numbers (₹, %) from the data. No hype, no guesses.
+If nothing in the data is about "${cardSearch}", return one section titled "Nothing new" with the point "No recent posts or news specifically about ${cardSearch}.". Reply in JSON.`
+        }, { role: 'user', content: `DATA:
+${rawIntel}` }],
       })
 
       await updateCard(session, card.id, { market_intel: JSON.stringify(report), market_intel_date: new Date().toISOString() })
       loadCards()
     } catch (error) {
-      setSyncError(`Sync Failed: ${error.message}`)
+      setSyncError(`Couldn't update ${card.nickname}: ${error.message}`)
     } finally {
       setLoading(prev => ({ ...prev, [card.id]: false }))
     }
@@ -123,7 +137,7 @@ export default function CardIntelligence({ session }) {
     setGlobalLoading(true)
     for (const card of cards) {
       await fetchIntelForCard(card)
-      await new Promise(r => setTimeout(r, 2000))
+      await new Promise(r => setTimeout(r, 1000))
     }
     setGlobalLoading(false)
   }

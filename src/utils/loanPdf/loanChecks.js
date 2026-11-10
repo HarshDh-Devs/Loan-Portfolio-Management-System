@@ -35,6 +35,52 @@ export const FORM_TO_EXTRACTED = {
   foreclosureChargePercent: 'foreclosureChargePercent',
   foreclosureChargeFlatAmount: 'foreclosureChargeFlat',
   foreclosureLockInMonths: 'foreclosureLockInMonths',
+  prepaymentChargeGst: 'prepaymentChargeGST',
+  foreclosureChargeGst: 'foreclosureChargeGST',
+}
+
+// A quote for these fields must actually talk about that topic.
+const TOPIC = {
+  prepayment: /pre-?pay|prepa(y|id)|part[\s-]?pay|part[\s-]?prepay/i,
+  foreclosure: /fore-?clos|pre-?clos|pre-?pay|prepa(y|id)|clos(e|ure|ing)/i,
+}
+function topicOf(formKey) {
+  const m = formKey.match(/^(prepayment|foreclosure)(Allowed|ChargePercent|ChargeFlatAmount|Steps|ChargeGst)$/)
+  return m ? m[1] : null
+}
+
+/**
+ * Is the quote about this topic? Checks the quote and, for text PDFs, the
+ * lines just above it (a table row often sits under a heading like
+ * "Pre-payment / Part Payment charges").
+ */
+function onTopic(re, extracted, sourceText) {
+  if (re.test(extracted.quote)) return true
+  if (extracted.source !== 'text' || !sourceText) return true // can't see the context — don't guess
+  const norm = (t) => t.toLowerCase().replace(/[|\s]+/g, ' ').trim()
+  const hay = norm(sourceText)
+  const idx = hay.indexOf(norm(extracted.quote).slice(0, 60))
+  if (idx < 0) return true
+  return re.test(hay.slice(Math.max(0, idx - 400), idx))
+}
+
+const describeSteps = (steps) => (steps || []).map(st => `${st.afterEmis}:${st.percent}`).join(',')
+
+function daysInMonth(y, m) {
+  return new Date(Date.UTC(y, m, 0)).getUTCDate()
+}
+
+/** First EMI date from an "account opened on day X → EMI on day Y" table. */
+export function firstEmiFromRules(disbursementISO, rules) {
+  if (!disbursementISO || !rules?.length) return null
+  const [y, m, d] = disbursementISO.split('-').map(Number)
+  const rule = rules.find(r => d >= r.openedFromDay && d <= r.openedToDay)
+  if (!rule) return null
+  const total = (m - 1) + rule.monthsLater
+  const yy = y + Math.floor(total / 12)
+  const mm = (total % 12) + 1
+  const dd = Math.min(rule.emiDay, daysInMonth(yy, mm))
+  return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
 }
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
@@ -125,7 +171,7 @@ const KIND = {
   foreclosureLockInMonths: 'integer',
 }
 
-function makeEvidence(extracted, formValue, extraction, kind, note) {
+function makeEvidence(extracted, formValue, extraction, kind, note, formKey = '') {
   const page = extraction.pages.find(p => p.id === extracted.page)
   const quoteFound = extracted.source === 'text' ? quoteInText(extracted.quote, extraction.sourceText) : null
   const numberFound = kind ? numberInQuote(kind, extracted.value, extracted.quote) : null
@@ -133,6 +179,9 @@ function makeEvidence(extracted, formValue, extraction, kind, note) {
   if (!extracted.quote) problem = 'The AI gave no quote for this value'
   else if (quoteFound === false) problem = "The quoted text couldn't be found in the PDF"
   else if (numberFound === false && !note) problem = "This value doesn't appear in the quoted text"
+  else if (topicOf(formKey) && !onTopic(TOPIC[topicOf(formKey)], extracted, extraction.sourceText)) {
+    problem = `The quoted text doesn't seem to be about ${topicOf(formKey) === 'prepayment' ? 'part-prepayment' : 'foreclosure'}`
+  }
   return {
     value: formValue,
     page: extracted.page,
@@ -164,9 +213,26 @@ export function extractionToForm(extraction) {
   for (const [formKey, exKey] of Object.entries(FORM_TO_EXTRACTED)) {
     const ex = f[exKey]
     if (!ex) continue
-    const value = typeof ex.value === 'boolean' ? String(ex.value) : String(ex.value)
-    form[formKey] = value
-    evidence[formKey] = makeEvidence(ex, value, extraction, KIND[formKey])
+    const value = String(ex.value)
+    form[formKey] = formKey.endsWith('ChargeGst') ? ex.value === true : value
+    evidence[formKey] = makeEvidence(ex, value, extraction, KIND[formKey], null, formKey)
+  }
+
+  // Charges that change after some EMIs (e.g. 3% up to 36 EMIs, then 2%).
+  for (const kind of ['prepayment', 'foreclosure']) {
+    const tiers = extraction[`${kind}ChargeTiers`] || []
+    const later = tiers.filter(t => t.afterEmis > 0)
+    if (!later.length) continue
+    const start = tiers.find(t => t.afterEmis === 0)
+    const pctKey = `${kind}ChargePercent`
+    if (start && form[pctKey] === '') {
+      form[pctKey] = String(start.percent)
+      evidence[pctKey] = makeEvidence({ ...start, value: start.percent }, form[pctKey], extraction, 'number', null, pctKey)
+    }
+    const steps = later.map(t => ({ afterEmis: String(t.afterEmis), percent: String(t.percent) }))
+    form[`${kind}Steps`] = steps
+    const first = later[0]
+    evidence[`${kind}Steps`] = makeEvidence({ ...first, value: first.percent }, describeSteps(steps), extraction, 'number', null, `${kind}Steps`)
   }
 
   // Fee shown only as a GST-inclusive total → split it here (exact math, not AI).
@@ -188,6 +254,36 @@ export function extractionToForm(extraction) {
       form[allowedKey] = 'true'
       const src = evidence[`${kind}ChargePercent`] || evidence[`${kind}ChargeFlatAmount`]
       evidence[allowedKey] = { ...src, value: 'true', note: 'A charge is stated, so it is allowed', problem: null }
+    }
+  }
+
+  // Dates the document doesn't state: estimate them, clearly marked for review.
+  if (!form.disbursementDate && f.sanctionDate) {
+    form.disbursementDate = f.sanctionDate.value
+    const page = extraction.pages.find(p => p.id === f.sanctionDate.page)
+    evidence.disbursementDate = {
+      value: form.disbursementDate,
+      pageText: page ? `${page.fileName}, page ${page.pageNo}` : null,
+      quote: f.sanctionDate.quote,
+      source: f.sanctionDate.source,
+      note: null,
+      estimated: true,
+      problem: 'Estimated: this is the sanction date. The money usually arrives the same day or a few days later — check your bank statement.',
+    }
+  }
+  if (!form.firstEmiDate && form.disbursementDate && extraction.emiDateRules?.length) {
+    const est = firstEmiFromRules(form.disbursementDate, extraction.emiDateRules)
+    if (est) {
+      form.firstEmiDate = est
+      evidence.firstEmiDate = {
+        value: est,
+        pageText: null,
+        quote: null,
+        source: 'rule',
+        note: null,
+        estimated: true,
+        problem: "Estimated from the document's EMI date table and the disbursement date — confirm with your first EMI debit.",
+      }
     }
   }
 
@@ -281,6 +377,13 @@ export function checkLoanForm(form, extraction, evidence = {}) {
       }
     }
   }
+  const TI = ex.totalInterest?.value
+  if (TI && P && R && N && E) {
+    const calcTI = E * N - P
+    if (Math.abs(calcTI - TI) <= Math.max(50, TI * 0.003) && Math.abs(emiFor(P, R, N) - E) <= Math.max(2, E * 0.003)) {
+      for (const k of ['principal', 'annualInterestRate', 'tenureMonths', 'emiAmount']) mark(k, 'verified', `Total interest matches the document (${fmtINR(TI)})`)
+    }
+  }
   if (flatStated && R && !(info.annualInterestRate?.status === 'check')) {
     const ir = P && N && E ? impliedRate(P, N, E) : null
     mark('annualInterestRate', 'check', 'The document says this is a flat rate. This app needs the reducing-balance rate.',
@@ -364,12 +467,19 @@ export function checkLoanForm(form, extraction, evidence = {}) {
     const v = n(k)
     if (v != null && N && v >= N) mark(k, 'check', 'The lock-in is as long as the whole loan.')
   }
+  for (const kind of ['prepayment', 'foreclosure']) {
+    const steps = form[`${kind}Steps`] || []
+    if (steps.some(st => Number(st.percent) > 10)) mark(`${kind}Steps`, 'check', 'Charges above 10% are unusual — make sure this is a percentage.')
+    if (N && steps.some(st => Number(st.afterEmis) >= N)) mark(`${kind}Steps`, 'check', 'This step starts after the loan would already be over.')
+  }
   const apr = n('apr')
   if (apr != null && R && apr < R - 0.05) mark('apr', 'check', 'APR is normally equal to or higher than the interest rate.')
 
   // 6. Source of each value
   for (const [k, ev] of Object.entries(evidence)) {
-    const current = k.startsWith('otherCharges.') ? form.otherCharges?.[Number(k.split('.')[1])]?.amount : form[k]
+    const current = k.startsWith('otherCharges.') ? form.otherCharges?.[Number(k.split('.')[1])]?.amount
+      : k.endsWith('Steps') ? describeSteps(form[k])
+      : form[k]
     const e = get(k)
     if (current === undefined) { delete info[k]; continue }
     if (String(current) !== String(ev.value)) {
@@ -392,6 +502,13 @@ export function checkLoanForm(form, extraction, evidence = {}) {
         get(formKey).status = 'missing'
       }
     }
+  }
+
+  const ref = ex.referenceNumber?.value
+  if (extraction && ref && !form.accountNumber) {
+    const e = get('accountNumber')
+    e.messages.push(`The document has a reference number (${ref}). It isn't the loan account number, but you can use it to identify this loan.`)
+    e.fix = { value: ref, label: 'Use reference no.' }
   }
 
   const statuses = Object.values(info).map(e => e.status)
