@@ -4,6 +4,9 @@
 
 import { LOAN_TYPES } from '../data/hybridStorage'
 
+// Small inputs that sit inside a sentence (no full width).
+const inlineInput = 'border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition'
+
 const inputBase = 'w-full border rounded-lg px-3 py-2.5 text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition'
 
 function inputTone(error, status) {
@@ -146,11 +149,11 @@ export default function LoanForm({ form, setForm, errors, setErrors, checks }) {
                   <span>After</span>
                   <input type="number" inputMode="numeric" value={st.afterEmis} aria-label="EMIs paid"
                     onChange={e => setSteps(steps.map((x, j) => (j === i ? { ...x, afterEmis: e.target.value } : x)))}
-                    className={`${inputBase} border-gray-200 w-20`} placeholder="36" />
+                    className={`${inlineInput} w-20`} placeholder="36" />
                   <span>EMIs, the charge becomes</span>
                   <input type="number" inputMode="decimal" step="0.01" value={st.percent} aria-label="Charge after these EMIs (%)"
                     onChange={e => setSteps(steps.map((x, j) => (j === i ? { ...x, percent: e.target.value } : x)))}
-                    className={`${inputBase} border-gray-200 w-20`} placeholder="2" />
+                    className={`${inlineInput} w-20`} placeholder="2" />
                   <span>%</span>
                   <button type="button" onClick={() => setSteps(steps.filter((_, j) => j !== i))}
                     aria-label="Remove step" className="w-8 h-8 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50">×</button>
