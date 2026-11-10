@@ -1,8 +1,29 @@
 import { useState, useEffect } from 'react'
 import { getCards, updateCard } from '../data/financeStorage'
 import Navbar from '../components/Navbar'
+import { askAI } from '../lib/ai'
 
-const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY
+const INTEL_MAX_CHARS = 9000
+
+const INTEL_SCHEMA = {
+  type: 'object',
+  properties: {
+    sections: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          points: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['title', 'points'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['sections'],
+  additionalProperties: false,
+}
 
 function IntelligenceDisplay({ content }) {
   if (!content) return null;
@@ -69,28 +90,26 @@ export default function CardIntelligence({ session }) {
         return loadCards()
       }
 
-      const rawIntel = children.map((child, i) => {
+      // Keep the request within Groq's free per-request size.
+      let rawIntel = ''
+      children.forEach((child, i) => {
         const p = child.data
-        return p.over_18 || p.author === 'AutoModerator' ? null : `[SOURCE ${i+1}] TITLE: ${p.title}\nCONTENT: ${p.selftext.substring(0, 500)}`
-      }).filter(Boolean).join('\n\n')
-
-      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-          messages: [{
-            role: 'system',
-            content: `You are an Expert Investigative Financial Journalist. Report ONLY on "${cardSearch}". If data doesn't mention "${cardSearch}", return: {"sections": [{"title": "No Card Relevance", "points": ["No specific data for ${cardSearch} found."]}]}. 10-14 day focus. Verbose points. JSON ONLY.`
-          }, { role: 'user', content: `DATA:\n${rawIntel}` }],
-          temperature: 0.1, max_tokens: 2000
-        })
+        if (p.over_18 || p.author === 'AutoModerator') return
+        const entry = `[SOURCE ${i+1}] TITLE: ${p.title}\nCONTENT: ${(p.selftext || '').substring(0, 500)}\n\n`
+        if (rawIntel.length + entry.length <= INTEL_MAX_CHARS) rawIntel += entry
       })
 
-      const groqData = await groqRes.json()
-      if (groqData.error) throw new Error(groqData.error.message)
-      
-      await updateCard(session, card.id, { market_intel: groqData.choices[0].message.content, market_intel_date: new Date().toISOString() })
+      const report = await askAI({
+        task: 'card-intel',
+        schema: INTEL_SCHEMA,
+        schemaName: 'card_intel',
+        messages: [{
+          role: 'system',
+          content: `You are an Expert Investigative Financial Journalist. Report ONLY on "${cardSearch}". If the data doesn't mention "${cardSearch}", return one section titled "No Card Relevance" with the point "No specific data for ${cardSearch} found.". 10-14 day focus. Verbose points. Reply in JSON.`
+        }, { role: 'user', content: `DATA:\n${rawIntel}` }],
+      })
+
+      await updateCard(session, card.id, { market_intel: JSON.stringify(report), market_intel_date: new Date().toISOString() })
       loadCards()
     } catch (error) {
       setSyncError(`Sync Failed: ${error.message}`)
@@ -117,7 +136,7 @@ export default function CardIntelligence({ session }) {
           <div>
             <h1 className="text-xl font-semibold text-gray-900">Credit Card Insights</h1>
             <p className="text-sm text-gray-400 mt-0.5">Latest happenings and intelligence from top Reddit communities</p>
-            <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mt-2">Powered by Groq · Llama 4 Scout</p>
+            <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mt-2">Powered by Groq · GPT-OSS</p>
           </div>
           <button onClick={refreshAll} disabled={globalLoading || cards.length === 0} className="px-5 py-2 bg-green-600 text-white text-xs font-semibold rounded-lg hover:bg-green-700 transition-all disabled:opacity-50 flex items-center gap-2 shadow-sm">
             {globalLoading ? <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> : '↺'} 

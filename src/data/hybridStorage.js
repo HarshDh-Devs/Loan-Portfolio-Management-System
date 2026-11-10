@@ -179,5 +179,6 @@ export async function migrateLocalToCloud() {
 }
 
 export const LOAN_TYPES = [
-  'Personal', 'Home', 'Car', 'Education', 'Credit Card', 'BNPL'
+  'Personal', 'Home', 'Car', 'Two-Wheeler', 'Education', 'Gold',
+  'Loan Against Property', 'Business', 'Consumer Durable', 'Credit Card', 'BNPL', 'Other',
 ]
