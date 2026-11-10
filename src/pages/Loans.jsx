@@ -268,7 +268,7 @@ function LoanCard({ loan, state, trueCost, navigate, onClose }) {
         <button onClick={() => navigate(`/loan/${loan.id}`)} className="flex-1 text-xs py-1.5 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50">Schedule</button>
         <button onClick={() => navigate(`/simulator?loan=${loan.id}`)} className="flex-1 text-xs py-1.5 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50">Simulate</button>
         <button onClick={() => navigate(`/edit/${loan.id}`)} className="flex-1 text-xs py-1.5 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50">Edit</button>
-        <button onClick={onClose} className="flex-1 text-xs py-1.5 rounded-md border border-red-100 text-red-400 hover:bg-red-50">Delete</button>
+        <button onClick={onClose} className="flex-1 text-xs py-1.5 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 whitespace-nowrap">Close loan</button>
       </div>
     </div>
   )
