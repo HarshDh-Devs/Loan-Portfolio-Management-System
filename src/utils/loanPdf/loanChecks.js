@@ -124,9 +124,25 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 function quoteInText(quote, sourceText) {
   if (!quote || !sourceText) return null
   const hay = squash(sourceText)
+  // 1. Exact (ignoring spaces, commas and table separators).
   const pieces = quote.split(/…|\.{3}/).map(squash).filter(p => p.length >= 4)
   if (!pieces.length) return null
-  return pieces.every(p => hay.includes(p))
+  if (pieces.every(p => hay.includes(p))) return true
+  // 2. Each table cell on its own (a label and its value can sit on different lines).
+  const cells = quote.split(/\s\|\s|…|\.{3}/).map(squash).filter(p => p.length >= 3)
+  if (cells.length > 1 && cells.every(c => hay.includes(c))) return true
+  // 3. Most of the quote's words near the quoted number (labels that wrap around the value).
+  const words = (quote.toLowerCase().match(/[a-z0-9][a-z0-9.%]*/g) || []).filter(w => w.length >= 3)
+  const anchor = words.filter(w => /\d/.test(w)).sort((a, b) => b.length - a.length)[0]
+  if (!anchor) return false
+  const plain = sourceText.toLowerCase().replace(/[,|]/g, '').replace(/\s+/g, ' ')
+  const a = anchor.replace(/,/g, '')
+  for (let i = plain.indexOf(a); i >= 0; i = plain.indexOf(a, i + 1)) {
+    const win = plain.slice(Math.max(0, i - 500), i + 500)
+    const hits = words.filter(w => win.includes(w.replace(/,/g, ''))).length
+    if (hits / words.length >= 0.8) return true
+  }
+  return false
 }
 
 function numberInQuote(kind, value, quote) {
@@ -255,6 +271,35 @@ export function extractionToForm(extraction) {
       const src = evidence[`${kind}ChargePercent`] || evidence[`${kind}ChargeFlatAmount`]
       evidence[allowedKey] = { ...src, value: 'true', note: 'A charge is stated, so it is allowed', problem: null }
     }
+  }
+
+  // Many banks use one "Pre-payment / Part Payment charges" table for both
+  // closing the loan and part-payments. If the AI only filled part-prepayment,
+  // copy those terms to foreclosure.
+  const fcKeys = ['foreclosureAllowed', 'foreclosureChargePercent', 'foreclosureChargeFlatAmount']
+  const fcEmpty = fcKeys.every(k => form[k] === '' || form[k] === 'null')
+  const preHasCharge = form.prepaymentChargePercent !== '' || form.prepaymentChargeFlatAmount !== ''
+  const src = extraction.sourceText || ''
+  const explicit = /pre-?payment[\s|]+charges?[^.]{0,40}(charged|levied|applicable|payable)[\s|]+on[\s|]+(the[\s|]+)?principal[\s|]+outstanding/i.test(src)
+  const shared = explicit || /pre-?payment\s*\/\s*part[\s-]*payment|fore-?closure[\s|]+charges?[\s|]+(will|shall)[\s|]+be[\s|]+as[\s|]+per/i.test(src)
+  if (fcEmpty && preHasCharge && shared && form.prepaymentAllowed !== 'false') {
+    const note = explicit
+      ? 'From the same charges table: the document says pre-payment charges apply on the principal outstanding, which means closing the whole loan.'
+      : null
+    const problem = explicit ? null : 'Copied from the part-prepayment charges (this document uses one table for both). Please confirm.'
+    const copy = (from, to, value) => {
+      form[to] = value
+      const ev = evidence[from]
+      if (ev) evidence[to] = { ...ev, value: String(value), note, problem }
+    }
+    copy('prepaymentAllowed', 'foreclosureAllowed', 'true')
+    if (form.prepaymentChargePercent !== '') copy('prepaymentChargePercent', 'foreclosureChargePercent', form.prepaymentChargePercent)
+    if (form.prepaymentChargeFlatAmount !== '') copy('prepaymentChargeFlatAmount', 'foreclosureChargeFlatAmount', form.prepaymentChargeFlatAmount)
+    if (form.prepaymentSteps?.length) {
+      form.foreclosureSteps = form.prepaymentSteps.map(st => ({ ...st }))
+      if (evidence.prepaymentSteps) evidence.foreclosureSteps = { ...evidence.prepaymentSteps, note, problem }
+    }
+    if (form.prepaymentChargeGst === true && form.foreclosureChargeGst !== true) copy('prepaymentChargeGst', 'foreclosureChargeGst', true)
   }
 
   // Dates the document doesn't state: estimate them, clearly marked for review.
