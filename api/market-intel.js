@@ -7,7 +7,7 @@ export default async function handler(req, res) {
   const { card } = req.query;
   if (!card) return res.status(400).json({ error: 'Card name is required' });
 
-  const GROQ_KEY = process.env.GROQ_API_KEY;
+  const GROQ_KEY = process.env.GROQ_API_KEY || process.env.VITE_GROQ_API_KEY;
   if (!GROQ_KEY) return res.status(500).json({ error: 'Groq API Key is missing in Vercel environment variables' });
 
   try {
@@ -45,7 +45,9 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'llama-3-70b-8192',
+        model: 'openai/gpt-oss-20b',
+        reasoning_effort: 'low',
+        include_reasoning: false,
         messages: [
           {
             role: 'system',
@@ -69,7 +71,7 @@ export default async function handler(req, res) {
           }
         ],
         temperature: 0.1,
-        max_tokens: 800
+        max_completion_tokens: 1600
       })
     });
 

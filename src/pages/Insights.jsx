@@ -3,27 +3,19 @@ import { getActiveLoans } from '../data/hybridStorage'
 import { getCurrentLoanState, calculateTrueCost } from '../math/engine'
 import { formatINR } from '../utils/format'
 import Navbar from '../components/Navbar'
+import { askAI } from '../lib/ai'
 
-const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY
-const GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
-
+// Runs through the /api/ai server route (model set in api/ai.js).
+// Extra room is added for the model's short internal reasoning.
 async function callGroq(systemPrompt, userPrompt, maxTokens = 1500) {
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.3,
-      max_tokens: maxTokens,
-    }),
+  return askAI({
+    task: 'insights',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    maxTokens: maxTokens + 800,
   })
-  const data = await response.json()
-  if (data.error) throw new Error(data.error.message)
-  return data.choices[0].message.content
 }
 
 function buildAnalysis(loans) {
@@ -371,7 +363,7 @@ One sentence: which to prioritise and the key reason.`
           <h1 className="text-xl font-semibold text-gray-900">Loan Portfolio Insights</h1>
           <p className="text-sm text-gray-400 mt-0.5">Strategic optimization and interest-saving analysis for your active debt.</p>
           <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mt-2">
-            Powered by Groq · Llama 4 Scout
+            Powered by Groq · GPT-OSS
           </p>
         </div>
 
