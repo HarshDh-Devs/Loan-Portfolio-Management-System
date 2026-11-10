@@ -9,9 +9,30 @@ export const emptyLoanForm = {
   processingFee: '', processingFeeGST: '', insuranceCharges: '', otherCharges: [],
   gstOnInterest: false,
   prepaymentAllowed: 'null', prepaymentChargePercent: '', prepaymentChargeFlatAmount: '',
-  prepaymentMinimumAmount: '', prepaymentLockInMonths: '',
+  prepaymentMinimumAmount: '', prepaymentLockInMonths: '', prepaymentChargeGst: false, prepaymentSteps: [],
   foreclosureAllowed: 'true', foreclosureChargePercent: '', foreclosureChargeFlatAmount: '',
-  foreclosureLockInMonths: '',
+  foreclosureLockInMonths: '', foreclosureChargeGst: false, foreclosureSteps: [],
+}
+
+// Charges that change after some EMIs, e.g. "3% up to 36 EMIs, 2% after".
+// The form keeps the starting rate in ...ChargePercent and later rates as steps.
+function tiersToForm(terms) {
+  const tiers = (terms?.chargeTiers || []).filter(t => Number.isFinite(Number(t.percent)))
+    .sort((a, b) => (Number(a.afterEmis) || 0) - (Number(b.afterEmis) || 0))
+  if (!tiers.length) return { start: null, steps: [] }
+  const startTier = tiers.find(t => !(Number(t.afterEmis) > 0))
+  return {
+    start: startTier ? Number(startTier.percent) : null,
+    steps: tiers.filter(t => Number(t.afterEmis) > 0).map(t => ({ afterEmis: String(t.afterEmis), percent: String(t.percent) })),
+  }
+}
+
+function stepsToTiers(startPercent, steps) {
+  const valid = steps
+    .filter(st => st.afterEmis !== '' && st.percent !== '' && Number(st.afterEmis) > 0)
+    .map(st => ({ afterEmis: Math.round(Number(st.afterEmis)), percent: Number(st.percent) }))
+    .sort((a, b) => a.afterEmis - b.afterEmis)
+  return valid.length ? [{ afterEmis: 0, percent: startPercent }, ...valid] : []
 }
 
 const str = (v) => (v === null || v === undefined ? '' : String(v))
@@ -23,6 +44,8 @@ export function loanToForm(loan) {
   const fc = loan.foreclosure || {}
   // Old loans stored "unknown" prepayment terms as zeros — show them as blank.
   const preNum = (v) => (pre.allowed == null && !v ? '' : str(v))
+  const preTiers = tiersToForm(pre)
+  const fcTiers = tiersToForm(fc)
   return {
     ...emptyLoanForm,
     nickname: loan.nickname || '',
@@ -43,14 +66,18 @@ export function loanToForm(loan) {
     otherCharges: (loan.fees?.otherCharges || []).map(c => ({ name: c.name || '', amount: str(c.amount) })),
     gstOnInterest: loan.gstOnInterest === true,
     prepaymentAllowed: tri(pre.allowed),
-    prepaymentChargePercent: preNum(pre.chargePercent),
+    prepaymentChargePercent: preTiers.start != null ? str(preTiers.start) : preNum(pre.chargePercent),
     prepaymentChargeFlatAmount: preNum(pre.chargeFlatAmount),
     prepaymentMinimumAmount: preNum(pre.minimumAmount),
     prepaymentLockInMonths: preNum(pre.lockInMonths),
+    prepaymentChargeGst: pre.gstOnCharge === true,
+    prepaymentSteps: preTiers.steps,
     foreclosureAllowed: tri(fc.allowed),
-    foreclosureChargePercent: fc.chargePercent ? str(fc.chargePercent) : '',
+    foreclosureChargePercent: fcTiers.start != null ? str(fcTiers.start) : fc.chargePercent ? str(fc.chargePercent) : '',
     foreclosureChargeFlatAmount: fc.chargeFlatAmount ? str(fc.chargeFlatAmount) : '',
     foreclosureLockInMonths: fc.lockInMonths ? str(fc.lockInMonths) : '',
+    foreclosureChargeGst: fc.gstOnCharge === true,
+    foreclosureSteps: fcTiers.steps,
   }
 }
 
@@ -96,6 +123,8 @@ export function formToLoan(form, existing = {}) {
       chargeFlatAmount: num(form.prepaymentChargeFlatAmount),
       minimumAmount: num(form.prepaymentMinimumAmount),
       lockInMonths: Math.round(num(form.prepaymentLockInMonths)),
+      gstOnCharge: form.prepaymentChargeGst === true,
+      chargeTiers: stepsToTiers(num(form.prepaymentChargePercent), form.prepaymentSteps || []),
     },
     foreclosure: {
       ...(existing.foreclosure || {}),
@@ -103,6 +132,8 @@ export function formToLoan(form, existing = {}) {
       chargePercent: num(form.foreclosureChargePercent),
       chargeFlatAmount: num(form.foreclosureChargeFlatAmount),
       lockInMonths: Math.round(num(form.foreclosureLockInMonths)),
+      gstOnCharge: form.foreclosureChargeGst === true,
+      chargeTiers: stepsToTiers(num(form.foreclosureChargePercent), form.foreclosureSteps || []),
     },
   }
 }
@@ -126,6 +157,11 @@ export function validateLoanForm(form) {
   ]
   for (const k of optionalNumbers) {
     if (form[k] !== '' && (!isNum(form[k]) || Number(form[k]) < 0)) e[k] = 'Enter a number'
+  }
+  for (const k of ['prepaymentSteps', 'foreclosureSteps']) {
+    if ((form[k] || []).some(st => (st.afterEmis !== '' && (!isNum(st.afterEmis) || Number(st.afterEmis) < 1)) || (st.percent !== '' && (!isNum(st.percent) || Number(st.percent) < 0)))) {
+      e[k] = 'Use whole EMIs (1 or more) and a percentage'
+    }
   }
   if (form.otherCharges.some(c => c.amount !== '' && (!isNum(c.amount) || Number(c.amount) < 0))) e.otherCharges = 'Amounts must be numbers'
   return e

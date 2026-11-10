@@ -121,6 +121,60 @@ export default function LoanForm({ form, setForm, errors, setErrors, checks }) {
     if (errors.otherCharges) setErrors(er => ({ ...er, otherCharges: null }))
   }
 
+  // "3% up to 36 EMIs, then 2%": the starting rate is the Charge (%) field,
+  // later rates are steps. Plus an "+ 18% GST on the charge" switch.
+  function ChargeSteps(kind) {
+    const key = `${kind}Steps`
+    const steps = form[key] || []
+    const entry = info[key]
+    const setSteps = (next) => {
+      setForm(f => ({ ...f, [key]: next }))
+      if (errors[key]) setErrors(er => ({ ...er, [key]: null }))
+    }
+    const gstKey = `${kind}ChargeGst`
+    return (
+      <div className="sm:col-span-2 lg:col-span-3 space-y-3">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Charge changes after some EMIs?</p>
+            <StatusBadge status={entry?.status} />
+          </div>
+          {steps.length > 0 && (
+            <div className="space-y-2 mb-2">
+              {steps.map((st, i) => (
+                <div key={i} className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                  <span>After</span>
+                  <input type="number" inputMode="numeric" value={st.afterEmis} aria-label="EMIs paid"
+                    onChange={e => setSteps(steps.map((x, j) => (j === i ? { ...x, afterEmis: e.target.value } : x)))}
+                    className={`${inputBase} border-gray-200 w-20`} placeholder="36" />
+                  <span>EMIs, the charge becomes</span>
+                  <input type="number" inputMode="decimal" step="0.01" value={st.percent} aria-label="Charge after these EMIs (%)"
+                    onChange={e => setSteps(steps.map((x, j) => (j === i ? { ...x, percent: e.target.value } : x)))}
+                    className={`${inputBase} border-gray-200 w-20`} placeholder="2" />
+                  <span>%</span>
+                  <button type="button" onClick={() => setSteps(steps.filter((_, j) => j !== i))}
+                    aria-label="Remove step" className="w-8 h-8 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50">×</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {errors[key] && <p className="text-xs text-red-500 mb-1">{errors[key]}</p>}
+          <button type="button" onClick={() => setSteps([...steps, { afterEmis: '', percent: '' }])}
+            className="text-xs font-medium text-green-700 hover:text-green-800">+ Add a later rate</button>
+          <FieldNotes entry={entry} onFix={() => {}} />
+        </div>
+        <div>
+          <label className="flex items-center gap-2 cursor-pointer w-fit">
+            <input type="checkbox" checked={form[gstKey] === true} onChange={e => setForm(f => ({ ...f, [gstKey]: e.target.checked }))} className="w-4 h-4 accent-green-600" />
+            <span className="text-sm text-gray-700">18% GST is added on top of the charge</span>
+            <StatusBadge status={info[gstKey]?.status} />
+          </label>
+          <FieldNotes entry={info[gstKey]} onFix={() => {}} />
+        </div>
+      </div>
+    )
+  }
+
   // Plain functions (not components) so inputs keep focus while typing.
   return (
     <div>
@@ -184,17 +238,19 @@ export default function LoanForm({ form, setForm, errors, setErrors, checks }) {
 
       <Section title="Part-Prepayment Terms" subtitle="Paying off some of the loan early">
         {Select({ name: 'prepaymentAllowed', label: 'Part-prepayment allowed?', options: yesNo })}
-        {Field({ name: 'prepaymentChargePercent', label: 'Charge (%)', type: 'number', placeholder: '2', step: '0.01' })}
+        {Field({ name: 'prepaymentChargePercent', label: (form.prepaymentSteps || []).length ? 'Starting Charge (%)' : 'Charge (%)', type: 'number', placeholder: '2', step: '0.01' })}
         {Field({ name: 'prepaymentChargeFlatAmount', label: 'Flat Charge (₹)', type: 'number', placeholder: '0' })}
         {Field({ name: 'prepaymentMinimumAmount', label: 'Minimum Amount (₹)', type: 'number', placeholder: 'Optional' })}
         {Field({ name: 'prepaymentLockInMonths', label: 'Lock-in (months)', type: 'number', placeholder: '0' })}
+        {ChargeSteps('prepayment')}
       </Section>
 
       <Section title="Foreclosure Terms" subtitle="Closing the whole loan early">
         {Select({ name: 'foreclosureAllowed', label: 'Foreclosure allowed?', options: yesNo })}
-        {Field({ name: 'foreclosureChargePercent', label: 'Charge (%)', type: 'number', placeholder: '3', step: '0.01' })}
+        {Field({ name: 'foreclosureChargePercent', label: (form.foreclosureSteps || []).length ? 'Starting Charge (%)' : 'Charge (%)', type: 'number', placeholder: '3', step: '0.01' })}
         {Field({ name: 'foreclosureChargeFlatAmount', label: 'Flat Charge (₹)', type: 'number', placeholder: '0' })}
         {Field({ name: 'foreclosureLockInMonths', label: 'Lock-in (months)', type: 'number', placeholder: '0' })}
+        {ChargeSteps('foreclosure')}
       </Section>
     </div>
   )

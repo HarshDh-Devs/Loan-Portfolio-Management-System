@@ -100,7 +100,7 @@ export default function LoanDetail({ session }) {
             <div>
               <p className="text-sm font-medium text-orange-700">
   Foreclosure charge: <span className="font-semibold">{formatINR(fc.foreclosureCharge)}</span>
-  {loan.foreclosure?.chargePercent > 0 && ` (${loan.foreclosure.chargePercent}% of outstanding)`}
+  {fc.chargePercent > 0 && ` (${fc.chargePercent}% of outstanding${fc.chargeGst > 0 ? ' + GST' : ''})`}
 </p>
               
             </div>

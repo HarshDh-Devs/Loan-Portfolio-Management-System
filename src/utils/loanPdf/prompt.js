@@ -13,6 +13,8 @@ export const FIELD_DEFS = {
   lender: { kind: 'string' },
   loanType: { kind: 'enum', values: [...LOAN_TYPES, 'Unknown'] },
   accountNumber: { kind: 'string' },
+  referenceNumber: { kind: 'string' },
+  sanctionDate: { kind: 'date' },
   principal: { kind: 'number' },
   netDisbursedAmount: { kind: 'number' },
   annualInterestRate: { kind: 'number' },
@@ -24,6 +26,7 @@ export const FIELD_DEFS = {
   disbursementDate: { kind: 'date' },
   firstEmiDate: { kind: 'date' },
   apr: { kind: 'number' },
+  totalInterest: { kind: 'number' },
   processingFee: { kind: 'number' },
   processingFeeGST: { kind: 'number' },
   processingFeeIncludesGST: { kind: 'boolean' },
@@ -33,10 +36,22 @@ export const FIELD_DEFS = {
   prepaymentChargeFlat: { kind: 'number' },
   prepaymentMinAmount: { kind: 'number' },
   prepaymentLockInMonths: { kind: 'integer' },
+  prepaymentChargeGST: { kind: 'boolean' },
   foreclosureAllowed: { kind: 'boolean' },
   foreclosureChargePercent: { kind: 'number' },
   foreclosureChargeFlat: { kind: 'number' },
   foreclosureLockInMonths: { kind: 'integer' },
+  foreclosureChargeGST: { kind: 'boolean' },
+}
+
+const TIERS = {
+  type: 'array',
+  items: strictObject({
+    afterEmis: { type: 'integer' },
+    percent: { type: 'number' },
+    page: { type: ['integer', 'null'] },
+    quote: { type: ['string', 'null'] },
+  }),
 }
 
 const NULLABLE = {
@@ -73,6 +88,17 @@ export const LOAN_SCHEMA = strictObject({
       quote: { type: ['string', 'null'] },
     }),
   },
+  prepaymentChargeTiers: TIERS,
+  foreclosureChargeTiers: TIERS,
+  emiDateRules: {
+    type: 'array',
+    items: strictObject({
+      openedFromDay: { type: 'integer' },
+      openedToDay: { type: 'integer' },
+      emiDay: { type: 'integer' },
+      monthsLater: { type: 'integer' },
+    }),
+  },
   schedule: strictObject({
     found: { type: 'boolean' },
     page: { type: ['integer', 'null'] },
@@ -103,11 +129,18 @@ FIELD RULES
 - interestType: "fixed" or "floating" as stated, else "unknown".
 - emiAmount: the regular monthly instalment — not a broken-period/pre-EMI amount and not a total.
 - tenureMonths: the loan tenure in months. numberOfInstallments: the number of EMIs, only if stated separately.
-- firstEmiDate: due date of the first regular EMI. disbursementDate: the date the loan was or will be disbursed.
+- firstEmiDate: due date of the first regular EMI. disbursementDate: the date the loan was or will be disbursed. sanctionDate: the date of the sanction letter / approval. Don't use the sanction date as the disbursement date unless the document says so.
+- emiDateRules: if the document has a table that says when the first EMI falls depending on the day the loan account is opened, copy each row (e.g. "opened 5th to 26th → EMI on the 5th of next month" → openedFromDay 5, openedToDay 26, emiDay 5, monthsLater 1; "same month" → monthsLater 0; "30th/31st" → 31). Empty list if there is none.
+- accountNumber: the loan account number only. referenceNumber: a sanction / application / reference number, if shown.
+- totalInterest: the total interest charge over the whole tenure, if stated.
 - processingFee: if fee and GST are shown separately, processingFee = fee without GST and processingFeeGST = the GST amount (processingFeeIncludesGST = false). If only one total "inclusive of GST" is shown, put that total in processingFee and set processingFeeIncludesGST = true.
 - insuranceCharges: one-time insurance premium charged or financed with the loan.
 - otherCharges: other one-time upfront charges in ₹ (stamp duty, documentation, login, CERSAI, valuation, legal…). Not penal, bounce, late-payment or per-EMI charges. Empty list if none.
-- Prepayment = part-payment of some principal. Foreclosure = pre-closure / paying off the whole loan. Percentages without GST. "Nil" or "0%" → charge 0 and allowed = true. "Not allowed" → allowed = false. Lock-in = months from the start during which it is not allowed.
+- Words differ between banks. Part-prepayment / part payment / partial prepayment = paying off SOME principal early → prepayment* fields. Foreclosure / pre-closure / full prepayment / "pre-payment charges on principal outstanding" = closing the WHOLE loan → foreclosure* fields. A single table titled like "Pre-payment / Part Payment charges" applies to BOTH: fill both prepayment* and foreclosure* from it.
+- Charge percentages without GST. If it says "+ GST" set prepaymentChargeGST / foreclosureChargeGST = true. "Nil" or "0%" → charge 0 and allowed = true. "Not allowed" → allowed = false. A stated charge means allowed = true.
+- If the charge changes with time (e.g. "up to 36 EMIs: 3%, after 36 EMIs: 2%"): put the starting rate in ...ChargePercent and list every rate in ...ChargeTiers with afterEmis = EMIs already paid when that rate starts ([{afterEmis 0, 3}, {afterEmis 36, 2}]; "after 1 year" → 12). Empty list if the charge never changes.
+- Lock-in = months from the start during which it is not allowed at all. A charge that only applies for a while is not a lock-in.
+- Ignore clauses that apply only to other cases than this loan (e.g. "for loans of ₹10 lakh or more" when this loan is smaller, or "if foreclosed from own funds" exceptions); don't use them as the value or the quote.
 - apr: the Annual Percentage Rate, if stated.
 - schedule: from a repayment / amortization table, if one is present: page, first row's due date, opening balance, interest, principal and instalment amounts, and installmentCount = the number of the last instalment row if visible. found = false and all nulls if there is no table.
 - loanType: the closest type. EMI on a credit card → "Credit Card". Pay-later → "BNPL". "Unknown" if unclear.

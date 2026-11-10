@@ -94,6 +94,25 @@ export function normalizeResult(raw, source) {
     }))
     .filter(c => c.amount > 0)
 
+  const tiers = (list) => (Array.isArray(list) ? list : [])
+    .map(t => ({
+      afterEmis: cleanValue({ kind: 'integer' }, t?.afterEmis),
+      percent: cleanValue({ kind: 'number' }, t?.percent),
+      page: Number.isInteger(t?.page) ? t.page : null,
+      quote: cleanQuote(t?.quote),
+      source,
+    }))
+    .filter(t => t.afterEmis != null && t.percent != null && t.percent <= 25)
+    .sort((a, b) => a.afterEmis - b.afterEmis)
+
+  const day = (v) => {
+    const n = cleanValue({ kind: 'integer' }, v)
+    return n != null && n >= 1 && n <= 31 ? n : null
+  }
+  const emiDateRules = (Array.isArray(raw?.emiDateRules) ? raw.emiDateRules : [])
+    .map(r => ({ openedFromDay: day(r?.openedFromDay), openedToDay: day(r?.openedToDay), emiDay: day(r?.emiDay), monthsLater: cleanValue({ kind: 'integer' }, r?.monthsLater) }))
+    .filter(r => r.openedFromDay && r.openedToDay && r.emiDay && r.monthsLater != null && r.monthsLater <= 2)
+
   const s = raw?.schedule || {}
   const num = v => cleanValue({ kind: 'number' }, v)
   const schedule = {
@@ -111,6 +130,9 @@ export function normalizeResult(raw, source) {
     documentType: typeof raw?.documentType === 'string' ? raw.documentType : 'other_loan_document',
     fields,
     otherCharges,
+    prepaymentChargeTiers: tiers(raw?.prepaymentChargeTiers),
+    foreclosureChargeTiers: tiers(raw?.foreclosureChargeTiers),
+    emiDateRules,
     schedule,
     notes: (Array.isArray(raw?.notes) ? raw.notes : []).filter(n => typeof n === 'string' && n.trim()).slice(0, 3),
   }
@@ -134,6 +156,9 @@ export function mergeResults(a, b) {
     documentType: betterDocType(a.documentType, b.documentType),
     fields,
     otherCharges,
+    prepaymentChargeTiers: a.prepaymentChargeTiers.length ? a.prepaymentChargeTiers : b.prepaymentChargeTiers,
+    foreclosureChargeTiers: a.foreclosureChargeTiers.length ? a.foreclosureChargeTiers : b.foreclosureChargeTiers,
+    emiDateRules: a.emiDateRules.length ? a.emiDateRules : b.emiDateRules,
     schedule: a.schedule.found ? a.schedule : b.schedule,
     notes: [...new Set([...a.notes, ...b.notes])].slice(0, 4),
   }

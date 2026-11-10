@@ -169,6 +169,33 @@ export function calculateTrueCost(loan) {
   }
 }
 
+// ── 3b. Prepayment / foreclosure charges ────────────────────
+/**
+ * Charge rate that applies after `emisPaid` EMIs. Supports step rates such as
+ * "3% up to 36 EMIs, 2% after" via terms.chargeTiers = [{ afterEmis, percent }].
+ */
+export function chargePercentAt(terms, emisPaid = 0) {
+  const tiers = Array.isArray(terms?.chargeTiers) ? terms.chargeTiers : []
+  if (tiers.length) {
+    const applicable = tiers
+      .filter(t => Number.isFinite(Number(t.percent)) && emisPaid >= (Number(t.afterEmis) || 0))
+      .sort((a, b) => (Number(b.afterEmis) || 0) - (Number(a.afterEmis) || 0))[0]
+    if (applicable) return Number(applicable.percent)
+  }
+  return Number(terms?.chargePercent) || 0
+}
+
+/**
+ * The charge for prepaying / foreclosing `amount` after `emisPaid` EMIs,
+ * including 18% GST when the terms say "+ GST".
+ */
+export function chargeAt(terms, emisPaid, amount) {
+  const percent = chargePercentAt(terms, emisPaid)
+  const base = percent > 0 ? (amount * percent) / 100 : (Number(terms?.chargeFlatAmount) || 0)
+  const gst = terms?.gstOnCharge ? base * 0.18 : 0
+  return { percent, base: round2(base), gst: round2(gst), total: round2(base + gst) }
+}
+
 // ── 4. Prepayment Savings ────────────────────────────────────
 /**
  * Simulates making an extra lump-sum payment in a given month.
@@ -210,13 +237,12 @@ export function calculatePrepaymentSavings(loan, extraAmount, fromMonth) {
   const outstandingAtMonth = rowAtMonth.openingBalance;
   const prepayAmount = Math.min(extraAmount, outstandingAtMonth);
 
-  // Prepayment charge
-  let prepayCharge = 0;
-  if (loan.prepayment?.chargePercent > 0) {
-    prepayCharge = (prepayAmount * loan.prepayment.chargePercent) / 100;
-  } else if (loan.prepayment?.chargeFlatAmount > 0) {
-    prepayCharge = loan.prepayment.chargeFlatAmount;
-  }
+  // Prepayment charge (step rates and GST included). Paying off everything
+  // is a foreclosure, so the foreclosure terms apply then.
+  const isFullPayoff = outstandingAtMonth - prepayAmount < 1;
+  const prepayCharge = isFullPayoff
+    ? chargeAt(loan.foreclosure, fromMonth - 1, outstandingAtMonth).total
+    : chargeAt(loan.prepayment, fromMonth - 1, prepayAmount).total;
 
   // Original interest from fromMonth onwards
   const originalInterestRemaining = schedule
@@ -291,13 +317,9 @@ export function calculateForeclosureSavings(loan, inMonth) {
 
   const outstanding = rowAtMonth.openingBalance;
 
-  // Foreclosure charge
-  let fcCharge = 0;
-  if (loan.foreclosure?.chargePercent > 0) {
-    fcCharge = (outstanding * loan.foreclosure.chargePercent) / 100;
-  } else if (loan.foreclosure?.chargeFlatAmount > 0) {
-    fcCharge = loan.foreclosure.chargeFlatAmount;
-  }
+  // Foreclosure charge (step rates and GST included)
+  const fcTerms = chargeAt(loan.foreclosure, inMonth - 1, outstanding);
+  const fcCharge = fcTerms.total;
 
   const totalPayout = outstanding + fcCharge;
   const interestRemaining = schedule
@@ -312,12 +334,7 @@ export function calculateForeclosureSavings(loan, inMonth) {
     const r = schedule[m - 1];
     if (!r) break;
     const intRem = schedule.slice(m - 1).reduce((s, x) => s + x.interestComponent, 0);
-    let fc = 0;
-    if (loan.foreclosure?.chargePercent > 0) {
-      fc = (r.openingBalance * loan.foreclosure.chargePercent) / 100;
-    } else if (loan.foreclosure?.chargeFlatAmount > 0) {
-      fc = loan.foreclosure.chargeFlatAmount;
-    }
+    const fc = chargeAt(loan.foreclosure, m - 1, r.openingBalance).total;
     if (intRem > fc) {
       breakEvenMonth = m;
       break;
@@ -328,6 +345,8 @@ export function calculateForeclosureSavings(loan, inMonth) {
     feasible: true,
     outstandingAtMonth: round2(outstanding),
     foreclosureCharge: round2(fcCharge),
+    chargePercent: fcTerms.percent,
+    chargeGst: fcTerms.gst,
     totalPayout: round2(totalPayout),
     interestSaved: round2(interestRemaining),
     netSavings: round2(netSavings),
