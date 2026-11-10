@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { getLoans } from '../data/hybridStorage'
+import { getActiveLoans } from '../data/hybridStorage'
 import { calculatePrepaymentSavings, calculateForeclosureSavings, getCurrentLoanState } from '../math/engine'
 import { formatINR, formatDate } from '../utils/format'
 import Navbar from '../components/Navbar'
@@ -19,7 +19,7 @@ export default function Simulator({ session }) {
 
   useEffect(() => {
     async function load() {
-      const data = await getLoans(session)
+      const data = await getActiveLoans(session)
       setLoans(data)
       const paramId = searchParams.get('loan')
       if (paramId && data.find(l => l.id === paramId)) {

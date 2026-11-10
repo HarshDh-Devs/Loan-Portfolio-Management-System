@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { getLoans } from '../data/hybridStorage'
+import { getActiveLoans } from '../data/hybridStorage'
 import { getCurrentLoanState, generateAmortizationSchedule, calculateTrueCost } from '../math/engine'
 import { formatINR, formatDate } from '../utils/format'
 import Navbar from '../components/Navbar'
@@ -19,7 +19,7 @@ export default function Alerts({ session }) {
 
   useEffect(() => {
     async function load() {
-      const loans = await getLoans(session)
+      const loans = await getActiveLoans(session)
       const all = []
 
       loans.forEach(loan => {

@@ -285,7 +285,10 @@ const nextSortOrder = (list) => ({
 })
 
 // New items start counting "total paid" from the current month.
-const startedNow = () => ({ total_paid_since: new Date().toISOString().slice(0, 7) })
+const startedNow = () => {
+  const d = new Date()  // local month, not UTC
+  return { total_paid_since: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+}
 
 // ── Cards ────────────────────────────────────────────────────────────────────
 

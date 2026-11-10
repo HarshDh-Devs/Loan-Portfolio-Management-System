@@ -16,7 +16,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
-import { getLoans } from '../data/hybridStorage'
+import { getActiveLoans } from '../data/hybridStorage'
 import { getCurrentLoanState } from '../math/engine'
 import {
   loadAllFinanceData, refreshFinanceData, onFinanceDataChanged, saveSettings, updateItemWith,
@@ -165,7 +165,7 @@ export default function Dashboard({ session }) {
       try {
         const [loaded, l] = await Promise.all([
           loadAllFinanceData(session),
-          getLoans(session)
+          getActiveLoans(session)
         ])
 
         // Monthly rollover + data repairs run inside the storage layer against the
@@ -1512,7 +1512,7 @@ function ItemCard({ item, type, onTogglePaid, onDelete, onUpdateBill, onUpdateTo
                     <input
                       type="month"
                       value={localSince}
-                      max={new Date().toISOString().slice(0, 7)}
+                      max={monthKey(new Date())}
                       onChange={(e) => setLocalSince(e.target.value)}
                       className="w-40 h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
                     />
