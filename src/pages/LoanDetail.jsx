@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { getLoanById } from '../data/hybridStorage'
 import { generateAmortizationSchedule, getCurrentLoanState, calculateTrueCost, calculateForeclosureSavings } from '../math/engine'
 import { formatINR, formatDate, formatPct, formatTenure } from '../utils/format'
+import { isLoanClosed, CLOSURE_LABEL } from '../utils/loanStatus'
 import Navbar from '../components/Navbar'
 
 export default function LoanDetail({ session }) {
@@ -60,10 +61,20 @@ export default function LoanDetail({ session }) {
             <h1 className="text-xl font-semibold text-gray-900">{loan.nickname}</h1>
             <p className="text-sm text-gray-400 mt-0.5">{loan.lender} · {loan.type} Loan · {formatTenure(loan.tenureMonths)}</p>
           </div>
-          <button onClick={() => navigate(`/simulator?loan=${loan.id}`)} className="px-5 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 font-medium">
-            Run Simulator →
-          </button>
+          {!isLoanClosed(loan) && (
+            <button onClick={() => navigate(`/simulator?loan=${loan.id}`)} className="px-5 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 font-medium">
+              Run Simulator →
+            </button>
+          )}
         </div>
+
+        {isLoanClosed(loan) && (
+          <div className="mb-6 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50 text-sm text-amber-800">
+            <span className="font-semibold">{CLOSURE_LABEL[loan.closure?.type] || 'Closed'}</span>
+            {' '}on {formatDate(loan.closure?.closed_on)}. This loan is history only: it doesn&apos;t count in your
+            outstanding, EMIs or alerts. The schedule below is the original plan.
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <StatCard label="Outstanding Principal" value={formatINR(state.outstanding)} valueClass="text-red-500" />

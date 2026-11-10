@@ -127,6 +127,29 @@ export async function deleteLoan(id, session) {
   else saveLocalLoans(updated)
 }
 
+/** Loans that are still running (closed loans excluded). */
+export async function getActiveLoans(session) {
+  const loans = await getLoans(session)
+  return loans.filter(l => l.status !== 'closed')
+}
+
+/** Mark a loan closed. Keeps every field so it remains as history. */
+export async function closeLoan(id, closure, session) {
+  const saved = await updateLoan(id, {
+    status: 'closed',
+    closure: { ...closure, closed_at: new Date().toISOString() },
+  }, session)
+  if (!saved) throw new Error('This loan no longer exists')
+  return saved
+}
+
+/** Undo a closure: the loan becomes active again. */
+export async function reopenLoan(id, session) {
+  const saved = await updateLoan(id, { status: 'active', closure: null }, session)
+  if (!saved) throw new Error('This loan no longer exists')
+  return saved
+}
+
 export async function getLoanById(id, session) {
   const loans = await getLoans(session)
   return loans.find(l => l.id === id) ?? null

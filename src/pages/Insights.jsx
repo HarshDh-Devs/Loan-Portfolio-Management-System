@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getLoans } from '../data/hybridStorage'
+import { getActiveLoans } from '../data/hybridStorage'
 import { getCurrentLoanState, calculateTrueCost } from '../math/engine'
 import { formatINR } from '../utils/format'
 import Navbar from '../components/Navbar'
@@ -217,7 +217,7 @@ export default function Insights({ session }) {
   const [compareLoading, setCompareLoading] = useState(false)
 
   useEffect(() => {
-    getLoans(session).then(data => {
+    getActiveLoans(session).then(data => {
       setLoans(data)
       if (data.length >= 2) { setCompareA(data[0].id); setCompareB(data[1].id) }
     })
