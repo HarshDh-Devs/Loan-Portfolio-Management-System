@@ -319,10 +319,11 @@ function CloseLoanModal({ loan, state, mode, onCancel, onConfirm, onDeletePerman
   const inputClass = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500'
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onCancel}>
+    // Closes only via Cancel / Mark as closed / Delete: a click outside (or a
+    // text selection that ends outside) must never throw away what you typed.
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <form
         onSubmit={submit}
-        onClick={(e) => e.stopPropagation()}
         className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden"
       >
         <div className="px-6 py-4 border-b border-gray-100">
